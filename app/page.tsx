@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'CEO' | 'AUDITOR'>('AUDITOR');
+  const [role, setRole] = useState<'ADMIN' | 'STAFF'>('STAFF');
   const router = useRouter();
 
   const handleLogin = (e: React.FormEvent) => {
@@ -14,97 +14,79 @@ export default function Login() {
     
     // Simulate Authentication
     if (email && password) {
-      // Store mock user in local storage
       localStorage.setItem('user', JSON.stringify({ email, role }));
-      
-      // Redirect based on role
-      if (role === 'CEO') {
-        router.push('/revenue'); // CEOs usually go to the financial dashboard
-      } else {
-        router.push('/parcels'); // Auditors usually go to logistics tracking
-      }
+      router.push('/dashboard'); 
     } else {
       alert("Please enter credentials");
     }
   };
 
   return (
-    <main className="min-h-screen bg-slate-100 flex items-center justify-center p-6 font-sans">
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
-        <div className="bg-[#5e6c37] p-8 text-center">
-          <h1 className="text-3xl font-black text-white italic tracking-tighter">AUDIT PRO</h1>
-          <p className="text-[#d9e3bc] text-sm mt-1 uppercase font-bold tracking-widest">Integrated Control System</p>
+    <main className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-6 font-sans">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
+        <div className="bg-[#0f172a] p-10 text-center">
+          <h1 className="text-4xl font-serif text-white tracking-widest uppercase">D-MAISON</h1>
+          <p className="text-[#947a46] text-xs mt-2 uppercase font-bold tracking-[0.2em]">Luxury Jewelry Audit & POS</p>
         </div>
         
-        <form onSubmit={handleLogin} className="p-8 space-y-6">
-          <div className="space-y-2">
-            <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Access Level</label>
-            <div className="grid grid-cols-2 gap-2">
+        <form onSubmit={handleLogin} className="p-10 space-y-8">
+          <div className="space-y-3">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em]">System Access Role</label>
+            <div className="grid grid-cols-2 gap-3">
               <button 
                 type="button"
-                onClick={() => setRole('AUDITOR')}
-                className={`py-3 rounded-xl font-bold border-2 transition-all ${
-                  role === 'AUDITOR' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-100 text-slate-400 hover:border-slate-200'
+                onClick={() => setRole('STAFF')}
+                className={`py-3 rounded-lg font-bold border-2 transition-all text-xs tracking-wider uppercase ${
+                  role === 'STAFF' ? 'border-[#947a46] bg-[#947a46] text-white' : 'border-slate-100 text-slate-400 hover:border-slate-200'
                 }`}
               >
-                Auditor
+                Staff
               </button>
               <button 
                 type="button"
-                onClick={() => setRole('CEO')}
-                className={`py-3 rounded-xl font-bold border-2 transition-all ${
-                  role === 'CEO' ? 'border-[#5e6c37] bg-[#5e6c37] text-white' : 'border-slate-100 text-slate-400 hover:border-slate-200'
+                onClick={() => setRole('ADMIN')}
+                className={`py-3 rounded-lg font-bold border-2 transition-all text-xs tracking-wider uppercase ${
+                  role === 'ADMIN' ? 'border-[#0f172a] bg-[#0f172a] text-white' : 'border-slate-100 text-slate-400 hover:border-slate-200'
                 }`}
               >
-                CEO
+                Admin
               </button>
             </div>
           </div>
 
-          <div className="space-y-4">
-            <div>
+          <div className="space-y-5">
+            <div className="group">
               <input 
                 type="email" 
-                placeholder="Email Address"
+                placeholder="Corporate Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#5e6c37] font-medium"
+                className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#947a46] font-medium text-sm transition-all"
               />
             </div>
-            <div>
+            <div className="group">
               <input 
                 type="password" 
-                placeholder="Secure Password"
+                placeholder="Access Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#5e6c37] font-medium"
+                className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#947a46] font-medium text-sm transition-all"
               />
             </div>
           </div>
 
           <button 
             type="submit"
-            className="w-full bg-slate-900 text-white py-4 rounded-xl font-black text-lg hover:bg-slate-800 transition-colors shadow-xl shadow-slate-200"
+            className="w-full bg-[#0f172a] text-white py-4 rounded-lg font-bold text-sm uppercase tracking-[0.1em] hover:bg-slate-800 transition-all shadow-lg"
           >
-            Authenticate Access
+            Authenticate Session
           </button>
 
-          <div className="relative py-4">
-            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-            <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-slate-400 font-bold">Or Quick Access</span></div>
+          <div className="pt-4 border-t border-slate-100">
+            <p className="text-center text-[10px] text-slate-400 uppercase tracking-widest leading-relaxed">
+              Proprietary System of D-Maison.<br/>Secure biometric-encrypted access enabled.
+            </p>
           </div>
-
-          <button 
-            type="button"
-            onClick={() => router.push('/parcels/track')}
-            className="w-full border-2 border-[#5e6c37] text-[#5e6c37] py-4 rounded-xl font-black text-lg hover:bg-[#5e6c37] hover:text-white transition-all shadow-sm"
-          >
-            Track a Parcel
-          </button>
-          
-          <p className="text-center text-xs text-slate-400">
-            Authorized Personnel Only. All activities are logged for auditing purposes.
-          </p>
         </form>
       </div>
     </main>
