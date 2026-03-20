@@ -38,7 +38,7 @@ export const dbService = {
       INSERT INTO invoices (invoice_number, customer_name, status, is_duplicate)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(invoice_number) DO UPDATE SET
-        customer_name = excluded.customer_name,
+        customer_name = COALESCE(excluded.customer_name, invoices.customer_name),
         is_duplicate = 1
     `);
 
