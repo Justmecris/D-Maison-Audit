@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-const pdf = require('pdf-parse');
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
 import { BankStatementParser } from '@/app/lib/bank-parser';
@@ -13,21 +12,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
-    // 1. Convert file to buffer
+    // Dynamic import to avoid build-time ESM issues with pdf-parse
+    const pdf = (await import('pdf-parse')).default;
+
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // 2. Archive the PDF file (Ensuring the directory exists)
     const filename = `${Date.now()}-${file.name}`;
     const uploadDir = path.join(process.cwd(), 'public/uploads');
     
     try {
       await mkdir(uploadDir, { recursive: true });
-    } catch (e) { /* directory might exist */ }
+    } catch (e) { }
 
     const filePath = path.join(uploadDir, filename);
     await writeFile(filePath, buffer);
 
-    // 3. Extract Text & Parse with Regex
     const data = await pdf(buffer);
     const transactions = BankStatementParser.parse(data.text);
     const totalRevenue = BankStatementParser.extractTotalRevenue(data.text);
@@ -38,7 +37,7 @@ export async function POST(req: Request) {
       archivePath: `/uploads/${filename}`,
       summary: {
         totalRevenue: totalRevenue || "Not found in statement",
-        transactions: transactions.slice(0, 10), // Return first 10 for preview
+        transactions: transactions.slice(0, 10),
       },
     });
 
