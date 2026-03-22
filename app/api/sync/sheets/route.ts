@@ -9,20 +9,20 @@ export async function GET() {
   if (SPREADSHEET_ID) {
     try {
       const sheetData = await fetchFromSheets(SPREADSHEET_ID, RANGE);
-      sheetData.forEach((item) => {
-        dbService.upsertInvoice({
+      for (const item of sheetData) {
+        await dbService.upsertInvoice({
           invoice_number: item.invoiceNumber,
           customer_name: item.customerName,
           status: 'PENDING',
         });
-      });
+      }
     } catch (error) {
       console.error('Google Sheets background sync failed:', error);
     }
   }
 
   try {
-    const allInvoices = dbService.getAllInvoices();
+    const allInvoices = await dbService.getAllInvoices();
     return NextResponse.json({ 
       success: true, 
       data: allInvoices
@@ -40,28 +40,49 @@ export async function POST(req: Request) {
     // Check if it's a bulk sync
     if (payload.items && Array.isArray(payload.items)) {
       console.log(`[API] Processing bulk sync of ${payload.items.length} items`);
-      payload.items.forEach((item: any) => {
-        dbService.upsertInvoice({
+      const { staffName, selectedDate } = payload;
+
+      for (const item of payload.items) {
+        await dbService.upsertInvoice({
           invoice_number: item.invoiceNumber,
           customer_name: item.customerName,
           status: item.status || 'PENDING'
         });
-      });
-      const finalCount = dbService.getAllInvoices().length;
+
+        // Add staff log for bulk items if staffName and selectedDate are provided
+        if (staffName && selectedDate && (item.status === 'VERIFIED')) {
+          await dbService.addVerificationLog({
+            staff_name: staffName,
+            date_processed: selectedDate,
+            invoice_number: item.invoiceNumber
+          });
+        }
+      }
+      const allInvoices = await dbService.getAllInvoices();
+      const finalCount = allInvoices.length;
       console.log(`[API] Bulk sync complete. Total records in DB: ${finalCount}`);
       return NextResponse.json({ success: true, count: payload.items.length, total: finalCount });
     }
 
     // Normal single-item update
-    const { invoiceNumber, customerName, status, scanTime } = payload;
+    const { invoiceNumber, customerName, status, scanTime, staffName, selectedDate } = payload;
     if (!invoiceNumber || !status) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
     if (status === 'VERIFIED') {
-      dbService.updateScanStatus(invoiceNumber, status, scanTime || new Date().toLocaleTimeString());
+      await dbService.updateScanStatus(invoiceNumber, status, scanTime || new Date().toLocaleTimeString());
+
+      // Add staff log if staffName and selectedDate are provided
+      if (staffName && selectedDate) {
+        await dbService.addVerificationLog({
+          staff_name: staffName,
+          date_processed: selectedDate,
+          invoice_number: invoiceNumber
+        });
+      }
     } else {
-      dbService.upsertInvoice({
+      await dbService.upsertInvoice({
         invoice_number: invoiceNumber,
         customer_name: customerName,
         status: status || 'PENDING'
