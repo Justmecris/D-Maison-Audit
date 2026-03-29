@@ -6,14 +6,24 @@ import { useRouter } from 'next/navigation';
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'ADMIN' | 'STAFF'>('STAFF');
+  const [role, setRole] = useState<'ADMIN' | 'CEO'>('ADMIN');
   const router = useRouter();
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     
     // Simulate Authentication
-    if (email && password) {
+    if (role === 'CEO') {
+      const requiredEmail = 'MaiahSalinas@gmail.com';
+      const requiredPassword = 'Maisalinas@D-Maison-Audit/.next/dev/cache/turbopack/0c06f068/00001915.sst';
+      
+      if (email === requiredEmail && password === requiredPassword) {
+        localStorage.setItem('user', JSON.stringify({ email, role }));
+        router.push('/dashboard');
+      } else {
+        alert("Invalid CEO credentials.");
+      }
+    } else if (email && password) {
       localStorage.setItem('user', JSON.stringify({ email, role }));
       router.push('/dashboard'); 
     } else {
@@ -35,21 +45,21 @@ export default function Login() {
             <div className="grid grid-cols-2 gap-3">
               <button 
                 type="button"
-                onClick={() => setRole('STAFF')}
-                className={`py-3 rounded-lg font-bold border-2 transition-all text-xs tracking-wider uppercase ${
-                  role === 'STAFF' ? 'border-[#947a46] bg-[#947a46] text-white' : 'border-slate-100 text-slate-400 hover:border-slate-200'
-                }`}
-              >
-                Staff
-              </button>
-              <button 
-                type="button"
                 onClick={() => setRole('ADMIN')}
                 className={`py-3 rounded-lg font-bold border-2 transition-all text-xs tracking-wider uppercase ${
                   role === 'ADMIN' ? 'border-[#0f172a] bg-[#0f172a] text-white' : 'border-slate-100 text-slate-400 hover:border-slate-200'
                 }`}
               >
                 Admin
+              </button>
+              <button 
+                type="button"
+                onClick={() => setRole('CEO')}
+                className={`py-3 rounded-lg font-bold border-2 transition-all text-xs tracking-wider uppercase ${
+                  role === 'CEO' ? 'border-amber-500 bg-amber-500 text-white' : 'border-slate-100 text-slate-400 hover:border-slate-200'
+                }`}
+              >
+                CEO
               </button>
             </div>
           </div>

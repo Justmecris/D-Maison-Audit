@@ -1,7 +1,8 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 const menuItems = [
   { name: 'Dashboard', href: '/dashboard', icon: (
@@ -35,6 +36,25 @@ const menuItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [userRole, setUserRole] = useState<'ADMIN' | 'CEO' | null>(null);
+
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    setUserRole(user.role || null);
+  }, []);
+
+  const handleSignOut = () => {
+    localStorage.removeItem('user');
+    router.push('/');
+  };
+
+  const filteredMenuItems = menuItems.filter(item => {
+    if (userRole === 'ADMIN') {
+      return ['J&T', 'J&T Logs', 'Settings'].includes(item.name);
+    }
+    return true; // CEO sees everything
+  });
 
   return (
     <div className="w-64 bg-white h-screen border-r border-slate-200 flex flex-col fixed left-0 top-0 z-50">
@@ -43,7 +63,7 @@ export default function Sidebar() {
       </div>
       
       <nav className="flex-1 py-6 px-4 space-y-2 overflow-y-auto bg-[#fcfcfc]">
-        {menuItems.map((item) => {
+        {filteredMenuItems.map((item) => {
           const isActive = pathname === item.href;
           return (
             <Link 
@@ -76,7 +96,10 @@ export default function Sidebar() {
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Administrator</p>
           </div>
         </div>
-        <button className="w-full flex items-center justify-center space-x-2 text-slate-400 hover:text-red-500 py-2 transition-colors">
+        <button 
+          onClick={handleSignOut}
+          className="w-full flex items-center justify-center space-x-2 text-slate-400 hover:text-red-500 py-2 transition-colors"
+        >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
           <span className="text-xs font-black uppercase tracking-widest">Sign Out</span>
         </button>

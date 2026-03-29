@@ -26,6 +26,8 @@ export default function JntReconciliation() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [showFlash, setShowFlash] = useState(false);
   const [isSessionLocked, setIsSessionLocked] = useState(false);
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -121,10 +123,6 @@ export default function JntReconciliation() {
 
     const scanTime = new Date().toLocaleTimeString();
     
-    audioRef.current?.play().catch(() => {});
-    setShowFlash(true);
-    setTimeout(() => setShowFlash(false), 300);
-
     setManifest(prev => prev.map(m => 
       m.invoiceNumber === item.invoiceNumber 
         ? { ...m, scanned: true, scanTime } 
@@ -244,6 +242,67 @@ export default function JntReconciliation() {
     }
   };
 
+  const handleDelete = async (invoiceNumber: string) => {
+    if (!confirm(`Are you sure you want to delete invoice #${invoiceNumber}?`)) return;
+    
+    try {
+      const response = await fetch('/api/sync/sheets', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceNumber })
+      });
+      const result = await response.json();
+      if (result.success) {
+        setManifest(prev => prev.filter(item => item.invoiceNumber !== invoiceNumber));
+      } else {
+        alert('Failed to delete invoice.');
+      }
+    } catch (error: any) {
+      alert(`Delete failed: ${error.message}`);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedInvoices.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedInvoices.length} selected invoices?`)) return;
+
+    try {
+      // For simplicity in the API, we'll delete them one by one or we could update the API to handle bulk delete.
+      // Let's use Promise.all to delete them in parallel.
+      const deletePromises = selectedInvoices.map(invoiceNumber => 
+        fetch('/api/sync/sheets', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invoiceNumber })
+        })
+      );
+
+      await Promise.all(deletePromises);
+      
+      setManifest(prev => prev.filter(item => !selectedInvoices.includes(item.invoiceNumber)));
+      setSelectedInvoices([]);
+      setIsDeleteMode(false);
+    } catch (error: any) {
+      alert(`Bulk delete failed: ${error.message}`);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedInvoices.length === filteredManifest.length) {
+      setSelectedInvoices([]);
+    } else {
+      setSelectedInvoices(filteredManifest.map(item => item.invoiceNumber));
+    }
+  };
+
+  const toggleSelectInvoice = (invoiceNumber: string) => {
+    setSelectedInvoices(prev => 
+      prev.includes(invoiceNumber) 
+        ? prev.filter(id => id !== invoiceNumber)
+        : [...prev, invoiceNumber]
+    );
+  };
+
   const stats = {
     total: manifest.length,
     scanned: manifest.filter(m => m.scanned).length,
@@ -304,6 +363,36 @@ export default function JntReconciliation() {
             📁 Upload Excel
             <input id="fileUpload" type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} />
           </button>
+          
+          <button 
+            onClick={() => {
+              setIsDeleteMode(!isDeleteMode);
+              setSelectedInvoices([]);
+            }} 
+            className={`p-3 rounded-xl shadow-lg transition-all flex items-center justify-center ${isDeleteMode ? 'bg-red-500 text-white ring-4 ring-red-100' : 'bg-white text-slate-600 border border-slate-200 hover:text-red-500'}`}
+            title={isDeleteMode ? "Cancel Deletion" : "Toggle Delete Mode"}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+          </button>
+
+          {isDeleteMode && (
+            <div className="flex gap-2 animate-in slide-in-from-right-4 duration-300">
+              <button 
+                onClick={toggleSelectAll}
+                className="px-4 py-2 bg-slate-100 text-slate-700 text-[9px] font-black uppercase rounded-lg hover:bg-slate-200 transition-all border border-slate-200"
+              >
+                {selectedInvoices.length === filteredManifest.length ? 'Deselect All' : 'Select All'}
+              </button>
+              {selectedInvoices.length > 0 && (
+                <button 
+                  onClick={handleBulkDelete}
+                  className="px-4 py-2 bg-red-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-red-700 transition-all shadow-md"
+                >
+                  Delete Selected ({selectedInvoices.length})
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
@@ -364,9 +453,23 @@ export default function JntReconciliation() {
               </thead>
               <tbody className="divide-y divide-slate-50 font-sans">
                 {filteredManifest.map((item) => (
-                  <tr key={item.invoiceNumber} id={`invoice-${item.invoiceNumber}`} className={`transition-all duration-300 ${highlightedInvoice === item.invoiceNumber ? 'bg-yellow-200 ring-2 ring-yellow-400 z-10 scale-[1.01] shadow-lg' : item.isDuplicate ? 'bg-amber-50/50' : item.scanned ? 'bg-emerald-50/50' : 'hover:bg-slate-50'}`}>
+                  <tr 
+                    key={item.invoiceNumber} 
+                    id={`invoice-${item.invoiceNumber}`} 
+                    onClick={() => isDeleteMode && toggleSelectInvoice(item.invoiceNumber)}
+                    className={`transition-all duration-300 ${isDeleteMode ? 'cursor-pointer' : ''} ${selectedInvoices.includes(item.invoiceNumber) ? 'bg-red-50 ring-2 ring-red-300' : highlightedInvoice === item.invoiceNumber ? 'bg-emerald-100 ring-2 ring-emerald-400 z-10' : item.isDuplicate ? 'bg-amber-50/50' : item.scanned ? 'bg-emerald-50/50' : 'hover:bg-slate-50'}`}
+                  >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
+                        {isDeleteMode && (
+                          <input 
+                            type="checkbox" 
+                            checked={selectedInvoices.includes(item.invoiceNumber)}
+                            onChange={() => toggleSelectInvoice(item.invoiceNumber)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-4 h-4 text-red-600 border-slate-300 rounded focus:ring-red-500"
+                          />
+                        )}
                         <span className={`font-mono text-sm font-black ${item.scanned ? 'text-emerald-700' : 'text-slate-900'}`}>#{item.invoiceNumber}</span>
                         {item.isDuplicate && <span className="bg-amber-500 text-white px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter shadow-sm">Duplicate</span>}
                       </div>

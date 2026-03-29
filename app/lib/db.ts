@@ -129,6 +129,16 @@ export const dbService = {
     return db.prepare('SELECT * FROM jnt_verification_logs ORDER BY timestamp DESC').all() as JntVerificationLog[];
   },
 
+  deleteInvoice: async (invoiceNumber: string) => {
+    if (isVercel && supabase) {
+      const { error } = await supabase.from('invoices').delete().eq('invoice_number', invoiceNumber);
+      if (error) throw error;
+      return;
+    }
+    const stmt = db.prepare('DELETE FROM invoices WHERE invoice_number = ?');
+    return stmt.run(invoiceNumber);
+  },
+
   clearAll: async () => {
     if (isVercel && supabase) {
       await supabase.from('jnt_verification_logs').delete().neq('log_id', 0);

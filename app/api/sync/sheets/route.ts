@@ -94,3 +94,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error.message || 'Update failed' }, { status: 500 });
   }
 }
+
+export async function DELETE(req: Request) {
+  try {
+    const { invoiceNumber } = await req.json();
+    if (!invoiceNumber) {
+      return NextResponse.json({ error: 'Invoice number required' }, { status: 400 });
+    }
+    await dbService.deleteInvoice(invoiceNumber);
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Delete failed' }, { status: 500 });
+  }
+}
