@@ -15,7 +15,7 @@ export default function Login() {
     // Simulate Authentication
     if (role === 'CEO') {
       const requiredEmail = 'MaiahSalinas@gmail.com';
-      const requiredPassword = 'Maisalinas@D-Maison-Audit/.next/dev/cache/turbopack/0c06f068/00001915.sst';
+      const requiredPassword = 'Maisalinas @D-Maison-Audit/.next/dev/cache/turbopack/0c06f068/00002159.sst';
       
       if (email === requiredEmail && password === requiredPassword) {
         localStorage.setItem('user', JSON.stringify({ email, role }));
