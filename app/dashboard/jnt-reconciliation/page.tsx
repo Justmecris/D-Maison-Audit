@@ -233,6 +233,12 @@ export default function JntReconciliation() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items, staffName, selectedDate })
       });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Server error (${response.status}): ${text.substring(0, 100)}`);
+      }
+
       const result = await response.json();
       if (result.success) await loadPersistentData();
     } catch (error: any) {

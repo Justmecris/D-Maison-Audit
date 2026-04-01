@@ -39,29 +39,39 @@ export async function POST(req: Request) {
     
     // Check if it's a bulk sync
     if (payload.items && Array.isArray(payload.items)) {
-      console.log(`[API] Processing bulk sync of ${payload.items.length} items`);
+      console.log(`[API] Processing bulk sync of ${payload.items.length} items. Staff: ${payload.staffName}, Date: ${payload.selectedDate}`);
       const { staffName, selectedDate } = payload;
 
-      for (const item of payload.items) {
-        await dbService.upsertInvoice({
-          invoice_number: item.invoiceNumber,
-          customer_name: item.customerName,
-          status: item.status || 'PENDING'
-        });
+      try {
+        for (const item of payload.items) {
+          if (!item.invoiceNumber) {
+             console.warn('[API] Skipping item with missing invoiceNumber:', item);
+             continue;
+          }
 
-        // Add staff log for bulk items if staffName and selectedDate are provided
-        if (staffName && selectedDate && (item.status === 'VERIFIED')) {
-          await dbService.addVerificationLog({
-            staff_name: staffName,
-            date_processed: selectedDate,
-            invoice_number: item.invoiceNumber
+          await dbService.upsertInvoice({
+            invoice_number: item.invoiceNumber,
+            customer_name: item.customerName || 'Unknown',
+            status: item.status || 'PENDING'
           });
+
+          // Add staff log for bulk items if staffName and selectedDate are provided
+          if (staffName && selectedDate && (item.status === 'VERIFIED')) {
+            await dbService.addVerificationLog({
+              staff_name: staffName,
+              date_processed: selectedDate,
+              invoice_number: item.invoiceNumber
+            });
+          }
         }
+        const allInvoices = await dbService.getAllInvoices();
+        const finalCount = allInvoices.length;
+        console.log(`[API] Bulk sync complete. Total records in DB: ${finalCount}`);
+        return NextResponse.json({ success: true, count: payload.items.length, total: finalCount });
+      } catch (dbError: any) {
+        console.error('[API BULK SYNC DB ERROR]', dbError);
+        return NextResponse.json({ error: `Database error during bulk sync: ${dbError.message}` }, { status: 500 });
       }
-      const allInvoices = await dbService.getAllInvoices();
-      const finalCount = allInvoices.length;
-      console.log(`[API] Bulk sync complete. Total records in DB: ${finalCount}`);
-      return NextResponse.json({ success: true, count: payload.items.length, total: finalCount });
     }
 
     // Normal single-item update
