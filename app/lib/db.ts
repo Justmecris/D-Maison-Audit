@@ -3,34 +3,43 @@ import path from 'path';
 import { supabase } from './supabase';
 
 const DB_PATH = path.join(process.cwd(), 'invoices.db');
-const db = new Database(DB_PATH);
 
-// Initialize the database schema
-db.exec(`
-  CREATE TABLE IF NOT EXISTS invoices (
-    invoice_number TEXT PRIMARY KEY,
-    customer_name TEXT,
-    status TEXT DEFAULT 'PENDING',
-    scanned_at TEXT,
-    synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    is_duplicate INTEGER DEFAULT 0
-  )
-`);
+let db: any = null;
+const isCloud = (process.env.VERCEL === '1' || process.env.NETLIFY === 'true' || process.env.NODE_ENV === 'production') && !!supabase;
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS jnt_verification_logs (
-    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    staff_name TEXT,
-    date_processed TEXT,
-    invoice_number TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    sync_status INTEGER DEFAULT 0
-  )
-`);
+if (!isCloud) {
+  try {
+    db = new Database(DB_PATH);
+    // Initialize the database schema
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS invoices (
+        invoice_number TEXT PRIMARY KEY,
+        customer_name TEXT,
+        status TEXT DEFAULT 'PENDING',
+        scanned_at TEXT,
+        synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        is_duplicate INTEGER DEFAULT 0
+      )
+    `);
 
-// Add Indexing for Performance
-db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices(invoice_number)`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_logs_invoice ON jnt_verification_logs(invoice_number)`);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS jnt_verification_logs (
+        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        staff_name TEXT,
+        date_processed TEXT,
+        invoice_number TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sync_status INTEGER DEFAULT 0
+      )
+    `);
+
+    // Add Indexing for Performance
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices(invoice_number)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_logs_invoice ON jnt_verification_logs(invoice_number)`);
+  } catch (err) {
+    console.error('Failed to initialize local SQLite database:', err);
+  }
+}
 
 export interface InvoiceRecord {
   invoice_number: string;
@@ -49,8 +58,6 @@ export interface JntVerificationLog {
   timestamp: string;
   sync_status: number;
 }
-
-const isCloud = (process.env.VERCEL === '1' || process.env.NETLIFY === 'true') && !!supabase;
 
 export const dbService = {
   getAllInvoices: async (): Promise<InvoiceRecord[]> => {
