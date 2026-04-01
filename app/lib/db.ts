@@ -5,7 +5,8 @@ import { supabase } from './supabase';
 const DB_PATH = path.join(process.cwd(), 'invoices.db');
 
 let db: any = null;
-const isCloud = (process.env.VERCEL === '1' || process.env.NETLIFY === 'true' || process.env.NODE_ENV === 'production') && !!supabase;
+// Force cloud mode if Supabase is initialized, otherwise try local SQLite
+const isCloud = !!supabase;
 
 if (!isCloud) {
   try {
@@ -59,10 +60,16 @@ export interface JntVerificationLog {
   sync_status: number;
 }
 
+const ensureDb = () => {
+  if (isCloud && supabase) return true;
+  if (db) return false;
+  throw new Error("Database not initialized. Please check your Supabase credentials (NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY).");
+};
+
 export const dbService = {
   getAllInvoices: async (): Promise<InvoiceRecord[]> => {
-    if (isCloud && supabase) {
-      const { data, error } = await supabase.from('invoices').select('*').order('synced_at', { ascending: false });
+    if (ensureDb()) {
+      const { data, error } = await supabase!.from('invoices').select('*').order('synced_at', { ascending: false });
       if (error) throw error;
       return data as InvoiceRecord[];
     }
@@ -70,10 +77,10 @@ export const dbService = {
   },
 
   upsertInvoice: async (invoice: Partial<InvoiceRecord>) => {
-    if (isCloud && supabase) {
-      const { data: existing } = await supabase.from('invoices').select('*').eq('invoice_number', invoice.invoice_number).single();
+    if (ensureDb()) {
+      const { data: existing } = await supabase!.from('invoices').select('*').eq('invoice_number', invoice.invoice_number).single();
       const isDuplicate = existing ? 1 : 0;
-      const { error } = await supabase.from('invoices').upsert({
+      const { error } = await supabase!.from('invoices').upsert({
         invoice_number: invoice.invoice_number,
         customer_name: invoice.customer_name,
         status: invoice.status || 'PENDING',
@@ -97,8 +104,8 @@ export const dbService = {
   },
 
   updateScanStatus: async (invoiceNumber: string, status: string, scanTime: string) => {
-    if (isCloud && supabase) {
-      const { error } = await supabase.from('invoices').update({ status, scanned_at: scanTime }).eq('invoice_number', invoiceNumber);
+    if (ensureDb()) {
+      const { error } = await supabase!.from('invoices').update({ status, scanned_at: scanTime }).eq('invoice_number', invoiceNumber);
       if (error) throw error;
       return;
     }
@@ -111,8 +118,8 @@ export const dbService = {
   },
 
   addVerificationLog: async (log: Omit<JntVerificationLog, 'log_id' | 'timestamp' | 'sync_status'>) => {
-    if (isCloud && supabase) {
-      const { error } = await supabase.from('jnt_verification_logs').insert({
+    if (ensureDb()) {
+      const { error } = await supabase!.from('jnt_verification_logs').insert({
         staff_name: log.staff_name,
         date_processed: log.date_processed,
         invoice_number: log.invoice_number
@@ -128,8 +135,8 @@ export const dbService = {
   },
 
   getVerificationLogs: async (): Promise<JntVerificationLog[]> => {
-    if (isCloud && supabase) {
-      const { data, error } = await supabase.from('jnt_verification_logs').select('*').order('timestamp', { ascending: false });
+    if (ensureDb()) {
+      const { data, error } = await supabase!.from('jnt_verification_logs').select('*').order('timestamp', { ascending: false });
       if (error) throw error;
       return data as JntVerificationLog[];
     }
@@ -137,8 +144,8 @@ export const dbService = {
   },
 
   deleteInvoice: async (invoiceNumber: string) => {
-    if (isCloud && supabase) {
-      const { error } = await supabase.from('invoices').delete().eq('invoice_number', invoiceNumber);
+    if (ensureDb()) {
+      const { error } = await supabase!.from('invoices').delete().eq('invoice_number', invoiceNumber);
       if (error) throw error;
       return;
     }
@@ -147,9 +154,9 @@ export const dbService = {
   },
 
   clearAll: async () => {
-    if (isCloud && supabase) {
-      await supabase.from('jnt_verification_logs').delete().neq('log_id', 0);
-      await supabase.from('invoices').delete().neq('invoice_number', '');
+    if (ensureDb()) {
+      await supabase!.from('jnt_verification_logs').delete().neq('log_id', 0);
+      await supabase!.from('invoices').delete().neq('invoice_number', '');
       return;
     }
     db.prepare('DELETE FROM jnt_verification_logs').run();
