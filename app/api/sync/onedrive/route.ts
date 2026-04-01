@@ -10,7 +10,7 @@ export async function GET() {
 
   try {
     const syncedData = await syncFromOneDrive(ONEDRIVE_URL);
-    const allInvoices = dbService.getAllInvoices();
+    const allInvoices = await dbService.getAllInvoices();
 
     return NextResponse.json({
       success: true,

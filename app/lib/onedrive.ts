@@ -84,14 +84,14 @@ export const syncFromOneDrive = async (url: string) => {
        throw new Error('OneDrive returned a login/preview page instead of the file. Ensure the file is shared with "Anyone with the link".');
     }
 
-    return processBuffer(buffer);
+    return await processBuffer(buffer);
   } catch (error: any) {
     console.error('OneDrive Sync Error:', error.message);
     throw error;
   }
 };
 
-const processBuffer = (buffer: ArrayBuffer) => {
+const processBuffer = async (buffer: ArrayBuffer) => {
   try {
     const workbook = XLSX.read(buffer, { type: 'array' });
     
@@ -124,13 +124,13 @@ const processBuffer = (buffer: ArrayBuffer) => {
     console.log(`[SYNC] Successfully parsed ${invoices.length} invoices from OneDrive.`);
 
     // Persistent Delta Syncing
-    invoices.forEach(inv => {
-      dbService.upsertInvoice({
+    for (const inv of invoices) {
+      await dbService.upsertInvoice({
         invoice_number: inv.invoiceNumber,
         customer_name: inv.customerName,
         status: 'PENDING'
       });
-    });
+    }
 
     return invoices;
   } catch (err: any) {
