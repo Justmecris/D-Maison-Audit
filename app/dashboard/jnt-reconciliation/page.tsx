@@ -29,6 +29,8 @@ export default function JntReconciliation() {
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
   
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -233,26 +235,55 @@ export default function JntReconciliation() {
     }
   };
 
-  const bulkSync = async (items: {invoiceNumber: string, customerName: string}[]) => {
-    setIsSyncing(true);
-    try {
-      const response = await fetch('/api/sync/sheets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, staffName, selectedDate })
-      });
+  const cancelUpload = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      setIsUploading(false);
+      setUploadProgress(0);
+      alert('Upload cancelled.');
+    }
+  };
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Server error (${response.status}): ${text.substring(0, 100)}`);
+  const bulkSync = async (items: {invoiceNumber: string, customerName: string}[]) => {
+    setIsUploading(true);
+    setUploadProgress(0);
+    abortControllerRef.current = new AbortController();
+    
+    const CHUNK_SIZE = 100;
+    const totalItems = items.length;
+    let processedCount = 0;
+
+    try {
+      // Break into chunks for progress tracking
+      for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
+        if (abortControllerRef.current.signal.aborted) return;
+
+        const chunk = items.slice(i, i + CHUNK_SIZE);
+        
+        const response = await fetch('/api/sync/sheets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: chunk, staffName, selectedDate }),
+          signal: abortControllerRef.current.signal
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`Server error (${response.status}): ${text.substring(0, 100)}`);
+        }
+
+        processedCount += chunk.length;
+        setUploadProgress(Math.round((processedCount / totalItems) * 100));
       }
 
-      const result = await response.json();
-      if (result.success) await loadPersistentData();
+      await loadPersistentData();
     } catch (error: any) {
+      if (error.name === 'AbortError') return;
       alert(`Bulk sync failed: ${error.message}`);
     } finally {
-      setIsSyncing(false);
+      setIsUploading(false);
+      setUploadProgress(0);
+      abortControllerRef.current = null;
     }
   };
 
@@ -333,13 +364,41 @@ export default function JntReconciliation() {
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }} 
-            className="fixed inset-0 bg-white/80 backdrop-blur-sm z-[100] flex flex-col items-center justify-center gap-4"
+            className="fixed inset-0 bg-white/90 backdrop-blur-md z-[100] flex flex-col items-center justify-center gap-8"
           >
-            <div className="w-16 h-16 border-4 border-slate-200 border-t-rose-500 rounded-full animate-spin" />
-            <div className="text-center">
-              <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Processing Data</h2>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Integrating with cloud server...</p>
+            <div className="relative w-32 h-32 flex items-center justify-center">
+              <svg className="w-full h-full -rotate-90">
+                <circle cx="64" cy="64" r="60" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-slate-100" />
+                <motion.circle 
+                  cx="64" cy="64" r="60" stroke="currentColor" strokeWidth="8" fill="transparent" 
+                  strokeDasharray={377}
+                  animate={{ strokeDashoffset: 377 - (377 * uploadProgress) / 100 }}
+                  className="text-rose-500"
+                />
+              </svg>
+              <span className="absolute text-2xl font-black text-slate-900">{uploadProgress}%</span>
             </div>
+
+            <div className="text-center space-y-2">
+              <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Bulk Uploading</h2>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest px-12 max-w-md">
+                Syncing items with cloud infrastructure. Please do not close this window.
+              </p>
+            </div>
+
+            <div className="w-64 bg-slate-100 h-2 rounded-full overflow-hidden">
+              <motion.div 
+                className="h-full bg-emerald-500" 
+                animate={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+
+            <button 
+              onClick={cancelUpload}
+              className="px-8 py-3 bg-rose-50 text-rose-600 text-xs font-black uppercase tracking-widest rounded-2xl hover:bg-rose-500 hover:text-white transition-all shadow-lg active:scale-95"
+            >
+              Cancel Upload
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
