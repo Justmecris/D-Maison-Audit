@@ -28,6 +28,7 @@ export default function JntReconciliation() {
   const [isSessionLocked, setIsSessionLocked] = useState(false);
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -186,6 +187,7 @@ export default function JntReconciliation() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setIsUploading(true);
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
@@ -200,7 +202,13 @@ export default function JntReconciliation() {
         await bulkSync(extracted);
       } catch (error: any) {
         alert(`Error parsing file: ${error.message}`);
+      } finally {
+        setIsUploading(false);
       }
+    };
+    reader.onerror = () => {
+      setIsUploading(false);
+      alert("Failed to read file.");
     };
     reader.readAsBinaryString(file);
   };
@@ -320,6 +328,20 @@ export default function JntReconciliation() {
     <div className="space-y-8 animate-in fade-in duration-700 relative">
       <AnimatePresence>
         {showFlash && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.3 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-emerald-400 z-50 pointer-events-none" />}
+        {isUploading && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }} 
+            className="fixed inset-0 bg-white/80 backdrop-blur-sm z-[100] flex flex-col items-center justify-center gap-4"
+          >
+            <div className="w-16 h-16 border-4 border-slate-200 border-t-rose-500 rounded-full animate-spin" />
+            <div className="text-center">
+              <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Processing Data</h2>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Integrating with cloud server...</p>
+            </div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       <header className="border-b border-slate-100 pb-8 flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
