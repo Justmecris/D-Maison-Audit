@@ -36,8 +36,13 @@ export default function PaymentAuditPage() {
   const [viewMode, setViewMode] = useState<'UPLOAD' | 'DASHBOARD'>('UPLOAD');
   const [dbItems, setDbItems] = useState<PaymentAuditItem[]>([]);
   const [isLoadingDb, setIsLoadingDb] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const parseData = (rawData: any[]) => {
     // Assuming first row is headers

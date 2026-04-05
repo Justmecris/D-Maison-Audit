@@ -44,8 +44,10 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [userRole, setUserRole] = useState<'ADMIN' | 'CEO' | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const user = JSON.parse(localStorage.getItem('user') || '{}');
     setUserRole(user.role || null);
   }, []);
@@ -54,6 +56,8 @@ export default function Sidebar() {
     localStorage.removeItem('user');
     router.push('/');
   };
+
+  if (!mounted) return <div className="w-64 bg-white h-screen border-r border-slate-200 fixed left-0 top-0 z-50" />;
 
   const filteredMenuItems = menuItems.filter(item => {
     if (userRole === 'ADMIN') {
