@@ -60,6 +60,32 @@ export interface JntVerificationLog {
   sync_status: number;
 }
 
+export interface PaymentAudit {
+  id?: number;
+  order_no: string;
+  alt_no: string;
+  tracking_number: string;
+  customer_name: string;
+  profile_name: string;
+  subtotal: number;
+  shipping_cost: number;
+  discount: number;
+  total: number;
+  paid_amount: number;
+  payment_provider: string;
+  account_no: string;
+  account_name: string;
+  paid_at: string;
+  sku: string;
+  item_name: string;
+  item_qty: number;
+  item_price: number;
+  grand_total: number;
+  confirmed_at?: string;
+  discrepancy: string;
+  audit_date: string;
+}
+
 const ensureDb = () => {
   if (isCloud && supabase) return true;
   if (db) return false;
@@ -161,6 +187,66 @@ export const dbService = {
     }
     db.prepare('DELETE FROM jnt_verification_logs').run();
     return db.prepare('DELETE FROM invoices').run();
+  },
+
+  getPaymentAudits: async (startDate?: string, endDate?: string): Promise<PaymentAudit[]> => {
+    if (ensureDb()) {
+      let query = supabase!.from('payment_audits').select('*');
+      if (startDate) query = query.gte('audit_date', startDate);
+      if (endDate) query = query.lte('audit_date', endDate);
+      const { data, error } = await query.order('confirmed_at', { ascending: false });
+      if (error) throw error;
+      return data as PaymentAudit[];
+    }
+    
+    let sql = 'SELECT * FROM payment_audits';
+    const params: any[] = [];
+    if (startDate || endDate) {
+      sql += ' WHERE';
+      if (startDate) {
+        sql += ' audit_date >= ?';
+        params.push(startDate);
+      }
+      if (endDate) {
+        if (startDate) sql += ' AND';
+        sql += ' audit_date <= ?';
+        params.push(endDate);
+      }
+    }
+    sql += ' ORDER BY confirmed_at DESC';
+    return db.prepare(sql).all(...params) as PaymentAudit[];
+  },
+
+  addPaymentAudits: async (audits: PaymentAudit[]) => {
+    if (ensureDb()) {
+      const { error } = await supabase!.from('payment_audits').insert(audits);
+      if (error) throw error;
+      return;
+    }
+
+    const stmt = db.prepare(`
+      INSERT INTO payment_audits (
+        order_no, alt_no, tracking_number, customer_name, profile_name,
+        subtotal, shipping_cost, discount, total, paid_amount,
+        payment_provider, account_no, account_name, paid_at,
+        sku, item_name, item_qty, item_price, grand_total,
+        discrepancy, audit_date
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertMany = db.transaction((items: PaymentAudit[]) => {
+      for (const item of items) {
+        stmt.run(
+          item.order_no, item.alt_no, item.tracking_number, item.customer_name, item.profile_name,
+          item.subtotal, item.shipping_cost, item.discount, item.total, item.paid_amount,
+          item.payment_provider, item.account_no, item.account_name, item.paid_at,
+          item.sku, item.item_name, item.item_qty, item.item_price, item.grand_total,
+          item.discrepancy, item.audit_date
+        );
+      }
+    });
+
+    return insertMany(audits);
   }
 };
 
