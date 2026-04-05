@@ -1,17 +1,18 @@
-import Database from 'better-sqlite3';
 import path from 'path';
 import { supabase } from './supabase';
 
-const DB_PATH = path.join(process.cwd(), 'invoices.db');
-
 let db: any = null;
-// Force cloud mode if Supabase is initialized, otherwise try local SQLite
 const isCloud = !!supabase;
 
-if (!isCloud) {
+const getDb = () => {
+  if (isCloud) return null;
+  if (db) return db;
+
+  const Database = require('better-sqlite3');
+  const DB_PATH = path.join(process.cwd(), 'invoices.db');
+
   try {
     db = new Database(DB_PATH);
-    // Initialize the database schema
     db.exec(`
       CREATE TABLE IF NOT EXISTS invoices (
         invoice_number TEXT PRIMARY KEY,
@@ -34,13 +35,42 @@ if (!isCloud) {
       )
     `);
 
-    // Add Indexing for Performance
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS payment_audits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_no TEXT,
+            alt_no TEXT,
+            tracking_number TEXT,
+            customer_name TEXT,
+            profile_name TEXT,
+            subtotal DECIMAL(10, 2),
+            shipping_cost DECIMAL(10, 2),
+            discount DECIMAL(10, 2),
+            total DECIMAL(10, 2),
+            paid_amount DECIMAL(10, 2),
+            payment_provider TEXT,
+            account_no TEXT,
+            account_name TEXT,
+            paid_at TEXT,
+            sku TEXT,
+            item_name TEXT,
+            item_qty INTEGER,
+            item_price DECIMAL(10, 2),
+            grand_total DECIMAL(10, 2),
+            confirmed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            discrepancy TEXT,
+            audit_date DATE
+        );
+    `);
+
     db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices(invoice_number)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_logs_invoice ON jnt_verification_logs(invoice_number)`);
+    return db;
   } catch (err) {
     console.error('Failed to initialize local SQLite database:', err);
+    return null;
   }
-}
+};
 
 export interface InvoiceRecord {
   invoice_number: string;
@@ -88,8 +118,9 @@ export interface PaymentAudit {
 
 const ensureDb = () => {
   if (isCloud && supabase) return true;
-  if (db) return false;
-  throw new Error("Database not initialized. Please check your Supabase credentials (NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY).");
+  const database = getDb();
+  if (database) return false;
+  throw new Error("Database not initialized.");
 };
 
 export const dbService = {
@@ -99,7 +130,7 @@ export const dbService = {
       if (error) throw error;
       return data as InvoiceRecord[];
     }
-    return db.prepare('SELECT * FROM invoices ORDER BY synced_at DESC').all() as InvoiceRecord[];
+    return getDb().prepare('SELECT * FROM invoices ORDER BY synced_at DESC').all() as InvoiceRecord[];
   },
 
   upsertInvoice: async (invoice: Partial<InvoiceRecord>) => {
@@ -115,10 +146,11 @@ export const dbService = {
       if (error) throw error;
       return;
     }
-    const existing = db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(invoice.invoice_number);
+    const database = getDb();
+    const existing = database.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(invoice.invoice_number);
     const isDuplicate = existing ? 1 : 0;
 
-    const stmt = db.prepare(`
+    const stmt = database.prepare(`
       INSERT INTO invoices (invoice_number, customer_name, status, is_duplicate)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(invoice_number) DO UPDATE SET
@@ -135,7 +167,7 @@ export const dbService = {
       if (error) throw error;
       return;
     }
-    const stmt = db.prepare(`
+    const stmt = getDb().prepare(`
       UPDATE invoices 
       SET status = ?, scanned_at = ?
       WHERE invoice_number = ?
@@ -153,7 +185,7 @@ export const dbService = {
       if (error) throw error;
       return;
     }
-    const stmt = db.prepare(`
+    const stmt = getDb().prepare(`
       INSERT INTO jnt_verification_logs (staff_name, date_processed, invoice_number)
       VALUES (?, ?, ?)
     `);
@@ -166,7 +198,7 @@ export const dbService = {
       if (error) throw error;
       return data as JntVerificationLog[];
     }
-    return db.prepare('SELECT * FROM jnt_verification_logs ORDER BY timestamp DESC').all() as JntVerificationLog[];
+    return getDb().prepare('SELECT * FROM jnt_verification_logs ORDER BY timestamp DESC').all() as JntVerificationLog[];
   },
 
   deleteInvoice: async (invoiceNumber: string) => {
@@ -175,7 +207,7 @@ export const dbService = {
       if (error) throw error;
       return;
     }
-    const stmt = db.prepare('DELETE FROM invoices WHERE invoice_number = ?');
+    const stmt = getDb().prepare('DELETE FROM invoices WHERE invoice_number = ?');
     return stmt.run(invoiceNumber);
   },
 
@@ -185,8 +217,9 @@ export const dbService = {
       await supabase!.from('invoices').delete().neq('invoice_number', '');
       return;
     }
-    db.prepare('DELETE FROM jnt_verification_logs').run();
-    return db.prepare('DELETE FROM invoices').run();
+    const database = getDb();
+    database.prepare('DELETE FROM jnt_verification_logs').run();
+    return database.prepare('DELETE FROM invoices').run();
   },
 
   getPaymentAudits: async (startDate?: string, endDate?: string): Promise<PaymentAudit[]> => {
@@ -214,7 +247,7 @@ export const dbService = {
       }
     }
     sql += ' ORDER BY confirmed_at DESC';
-    return db.prepare(sql).all(...params) as PaymentAudit[];
+    return getDb().prepare(sql).all(...params) as PaymentAudit[];
   },
 
   addPaymentAudits: async (audits: PaymentAudit[]) => {
@@ -224,7 +257,8 @@ export const dbService = {
       return;
     }
 
-    const stmt = db.prepare(`
+    const database = getDb();
+    const stmt = database.prepare(`
       INSERT INTO payment_audits (
         order_no, alt_no, tracking_number, customer_name, profile_name,
         subtotal, shipping_cost, discount, total, paid_amount,
@@ -234,7 +268,7 @@ export const dbService = {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const insertMany = db.transaction((items: PaymentAudit[]) => {
+    const insertMany = database.transaction((items: PaymentAudit[]) => {
       for (const item of items) {
         stmt.run(
           item.order_no, item.alt_no, item.tracking_number, item.customer_name, item.profile_name,
@@ -249,5 +283,3 @@ export const dbService = {
     return insertMany(audits);
   }
 };
-
-export default db;
