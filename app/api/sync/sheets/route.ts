@@ -9,11 +9,13 @@ export async function GET() {
   if (SPREADSHEET_ID) {
     try {
       const sheetData = await fetchFromSheets(SPREADSHEET_ID, RANGE);
+      // Only upsert without status to avoid resetting verified ones, 
+      // or handle logic to only add new ones as PENDING
       for (const item of sheetData) {
         await dbService.upsertInvoice({
           invoice_number: item.invoiceNumber,
           customer_name: item.customerName,
-          status: 'PENDING',
+          // Removed status: 'PENDING' to allow dbService to use default or preserve existing
         });
       }
     } catch (error) {

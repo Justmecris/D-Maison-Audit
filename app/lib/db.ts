@@ -158,12 +158,21 @@ export const dbService = {
     if (ensureDb()) {
       const { data: existing } = await supabase!.from('invoices').select('*').eq('invoice_number', invoice.invoice_number).single();
       const isDuplicate = existing ? 1 : 0;
-      const { error } = await supabase!.from('invoices').upsert({
+      
+      const payload: any = {
         invoice_number: invoice.invoice_number,
         customer_name: invoice.customer_name,
-        status: invoice.status || 'PENDING',
         is_duplicate: isDuplicate
-      });
+      };
+
+      // Only set status if explicitly provided OR if it's a new record
+      if (invoice.status) {
+        payload.status = invoice.status;
+      } else if (!existing) {
+        payload.status = 'PENDING';
+      }
+
+      const { error } = await supabase!.from('invoices').upsert(payload);
       if (error) throw error;
       return;
     }
@@ -176,10 +185,11 @@ export const dbService = {
       VALUES (?, ?, ?, ?)
       ON CONFLICT(invoice_number) DO UPDATE SET
         customer_name = COALESCE(excluded.customer_name, invoices.customer_name),
-        is_duplicate = 1
+        is_duplicate = 1,
+        status = COALESCE(?, invoices.status)
     `);
 
-    return stmt.run(invoice.invoice_number, invoice.customer_name, invoice.status || 'PENDING', isDuplicate);
+    return stmt.run(invoice.invoice_number, invoice.customer_name, invoice.status || (existing ? null : 'PENDING'), isDuplicate, invoice.status || null);
   },
 
   updateScanStatus: async (invoiceNumber: string, status: string, scanTime: string) => {
@@ -235,16 +245,27 @@ export const dbService = {
   bulkUpsertInvoices: async (invoices: Partial<InvoiceRecord>[]) => {
     if (ensureDb()) {
       const invoiceNumbers = invoices.map(i => i.invoice_number).filter(Boolean) as string[];
-      // Optimization: Fetch existing in one go to mark duplicates
-      const { data: existing } = await supabase!.from('invoices').select('invoice_number').in('invoice_number', invoiceNumbers);
-      const existingSet = new Set(existing?.map(e => e.invoice_number));
+      // Optimization: Fetch existing in one go to mark duplicates and preserve status
+      const { data: existing } = await supabase!.from('invoices').select('invoice_number, status').in('invoice_number', invoiceNumbers);
+      const existingMap = new Map(existing?.map(e => [e.invoice_number, e.status]));
 
-      const toUpsert = invoices.map(i => ({
-        invoice_number: i.invoice_number,
-        customer_name: i.customer_name,
-        status: i.status || 'PENDING',
-        is_duplicate: existingSet.has(i.invoice_number!) ? 1 : 0
-      }));
+      const toUpsert = invoices.map(i => {
+        const currentStatus = existingMap.get(i.invoice_number!);
+        const payload: any = {
+          invoice_number: i.invoice_number,
+          customer_name: i.customer_name,
+          is_duplicate: existingMap.has(i.invoice_number!) ? 1 : 0
+        };
+        
+        // Preserve status if it exists and no new status is provided
+        if (i.status) {
+          payload.status = i.status;
+        } else if (!existingMap.has(i.invoice_number!)) {
+          payload.status = 'PENDING';
+        }
+        
+        return payload;
+      });
 
       const { error } = await supabase!.from('invoices').upsert(toUpsert);
       if (error) throw error;
@@ -257,16 +278,23 @@ export const dbService = {
       VALUES (?, ?, ?, ?)
       ON CONFLICT(invoice_number) DO UPDATE SET
         customer_name = COALESCE(excluded.customer_name, invoices.customer_name),
-        is_duplicate = 1
+        is_duplicate = 1,
+        status = COALESCE(?, invoices.status)
     `);
 
-    const selectStmt = database.prepare('SELECT 1 FROM invoices WHERE invoice_number = ?');
+    const selectStmt = database.prepare('SELECT status FROM invoices WHERE invoice_number = ?');
 
     const transaction = database.transaction((items: Partial<InvoiceRecord>[]) => {
       for (const item of items) {
         const existing = selectStmt.get(item.invoice_number);
         const isDuplicate = existing ? 1 : 0;
-        insertStmt.run(item.invoice_number, item.customer_name, item.status || 'PENDING', isDuplicate);
+        insertStmt.run(
+          item.invoice_number, 
+          item.customer_name, 
+          item.status || (existing ? null : 'PENDING'), 
+          isDuplicate,
+          item.status || null
+        );
       }
     });
 

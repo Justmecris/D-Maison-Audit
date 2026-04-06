@@ -83,14 +83,27 @@ export default function JntReconciliation() {
       const res = await fetch('/api/sync/sheets');
       const result = await res.json();
       if (result.success && result.data) {
-        const formatted = result.data.map((item: any) => ({
+        const incoming = result.data.map((item: any) => ({
           invoiceNumber: item.invoice_number,
           customerName: item.customer_name,
           scanned: item.status === 'VERIFIED',
           scanTime: item.scanned_at,
           isDuplicate: !!item.is_duplicate
         }));
-        setManifest(formatted);
+
+        setManifest(prev => {
+          // If manifest is empty, just take incoming
+          if (prev.length === 0) return incoming;
+
+          // Merge: Keep local 'scanned' status if it's truer than the server's
+          return incoming.map(item => {
+            const local = prev.find(p => p.invoiceNumber === item.invoiceNumber);
+            if (local && local.scanned && !item.scanned) {
+              return { ...item, scanned: true, scanTime: local.scanTime };
+            }
+            return item;
+          });
+        });
       }
     } catch (error) {
       console.error('Failed to load data:', error);
