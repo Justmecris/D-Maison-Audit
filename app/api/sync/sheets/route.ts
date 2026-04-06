@@ -43,27 +43,32 @@ export async function POST(req: Request) {
       const { staffName, selectedDate } = payload;
 
       try {
-        for (const item of payload.items) {
-          if (!item.invoiceNumber) {
-             console.warn('[API] Skipping item with missing invoiceNumber:', item);
-             continue;
-          }
+        const validItems = payload.items.filter((item: any) => item.invoiceNumber);
+        
+        // Prepare bulk upsert for invoices
+        const invoicesToUpsert = validItems.map((item: any) => ({
+          invoice_number: item.invoiceNumber,
+          customer_name: item.customerName || 'Unknown',
+          status: item.status || 'PENDING'
+        }));
 
-          await dbService.upsertInvoice({
-            invoice_number: item.invoiceNumber,
-            customer_name: item.customerName || 'Unknown',
-            status: item.status || 'PENDING'
-          });
+        await dbService.bulkUpsertInvoices(invoicesToUpsert);
 
-          // Add staff log for bulk items if staffName and selectedDate are provided
-          if (staffName && selectedDate && (item.status === 'VERIFIED')) {
-            await dbService.addVerificationLog({
+        // Prepare bulk insert for verification logs
+        if (staffName && selectedDate) {
+          const logsToInsert = validItems
+            .filter((item: any) => item.status === 'VERIFIED')
+            .map((item: any) => ({
               staff_name: staffName,
               date_processed: selectedDate,
               invoice_number: item.invoiceNumber
-            });
+            }));
+
+          if (logsToInsert.length > 0) {
+            await dbService.bulkAddVerificationLogs(logsToInsert);
           }
         }
+
         const allInvoices = await dbService.getAllInvoices();
         const finalCount = allInvoices.length;
         console.log(`[API] Bulk sync complete. Total records in DB: ${finalCount}`);

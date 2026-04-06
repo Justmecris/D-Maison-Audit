@@ -211,6 +211,73 @@ export const dbService = {
     return stmt.run(invoiceNumber);
   },
 
+  bulkUpsertInvoices: async (invoices: Partial<InvoiceRecord>[]) => {
+    if (ensureDb()) {
+      const invoiceNumbers = invoices.map(i => i.invoice_number).filter(Boolean) as string[];
+      // Optimization: Fetch existing in one go to mark duplicates
+      const { data: existing } = await supabase!.from('invoices').select('invoice_number').in('invoice_number', invoiceNumbers);
+      const existingSet = new Set(existing?.map(e => e.invoice_number));
+
+      const toUpsert = invoices.map(i => ({
+        invoice_number: i.invoice_number,
+        customer_name: i.customer_name,
+        status: i.status || 'PENDING',
+        is_duplicate: existingSet.has(i.invoice_number!) ? 1 : 0
+      }));
+
+      const { error } = await supabase!.from('invoices').upsert(toUpsert);
+      if (error) throw error;
+      return;
+    }
+
+    const database = getDb();
+    const insertStmt = database.prepare(`
+      INSERT INTO invoices (invoice_number, customer_name, status, is_duplicate)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(invoice_number) DO UPDATE SET
+        customer_name = COALESCE(excluded.customer_name, invoices.customer_name),
+        is_duplicate = 1
+    `);
+
+    const selectStmt = database.prepare('SELECT 1 FROM invoices WHERE invoice_number = ?');
+
+    const transaction = database.transaction((items: Partial<InvoiceRecord>[]) => {
+      for (const item of items) {
+        const existing = selectStmt.get(item.invoice_number);
+        const isDuplicate = existing ? 1 : 0;
+        insertStmt.run(item.invoice_number, item.customer_name, item.status || 'PENDING', isDuplicate);
+      }
+    });
+
+    return transaction(invoices);
+  },
+
+  bulkAddVerificationLogs: async (logs: Omit<JntVerificationLog, 'log_id' | 'timestamp' | 'sync_status'>[]) => {
+    if (ensureDb()) {
+      const { error } = await supabase!.from('jnt_verification_logs').insert(logs.map(log => ({
+        staff_name: log.staff_name,
+        date_processed: log.date_processed,
+        invoice_number: log.invoice_number
+      })));
+      if (error) throw error;
+      return;
+    }
+
+    const database = getDb();
+    const stmt = database.prepare(`
+      INSERT INTO jnt_verification_logs (staff_name, date_processed, invoice_number)
+      VALUES (?, ?, ?)
+    `);
+
+    const transaction = database.transaction((items: any[]) => {
+      for (const item of items) {
+        stmt.run(item.staff_name, item.date_processed, item.invoice_number);
+      }
+    });
+
+    return transaction(logs);
+  },
+
   clearAll: async () => {
     if (ensureDb()) {
       await supabase!.from('jnt_verification_logs').delete().neq('log_id', 0);
