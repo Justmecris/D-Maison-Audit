@@ -249,7 +249,7 @@ export default function JntReconciliation() {
     setUploadProgress(0);
     abortControllerRef.current = new AbortController();
     
-    const CHUNK_SIZE = 100;
+    const CHUNK_SIZE = 50; // Reduced from 100 to prevent timeouts
     const totalItems = items.length;
     let processedCount = 0;
 
@@ -260,20 +260,53 @@ export default function JntReconciliation() {
 
         const chunk = items.slice(i, i + CHUNK_SIZE);
         
-        const response = await fetch('/api/sync/sheets', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: chunk, staffName, selectedDate }),
-          signal: abortControllerRef.current.signal
-        });
+        let success = false;
+        let retries = 0;
+        const maxRetries = 3;
 
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(`Server error (${response.status}): ${text.substring(0, 100)}`);
+        while (!success && retries <= maxRetries) {
+          try {
+            const response = await fetch('/api/sync/sheets', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ items: chunk, staffName, selectedDate }),
+              signal: abortControllerRef.current.signal
+            });
+
+            if (!response.ok) {
+              const text = await response.text();
+              // If it's a server error (502, 503, 504), retry
+              if ([502, 503, 504].includes(response.status) && retries < maxRetries) {
+                retries++;
+                const delay = Math.pow(2, retries) * 1000;
+                console.warn(`[BULK SYNC] Server error ${response.status}. Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+              }
+              throw new Error(`Server error (${response.status}): ${text.substring(0, 100)}`);
+            }
+
+            success = true;
+          } catch (fetchError: any) {
+            if (fetchError.name === 'AbortError') throw fetchError;
+            if (retries < maxRetries) {
+              retries++;
+              const delay = Math.pow(2, retries) * 1000;
+              console.warn(`[BULK SYNC] Fetch error. Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+              throw fetchError;
+            }
+          }
         }
 
         processedCount += chunk.length;
         setUploadProgress(Math.round((processedCount / totalItems) * 100));
+
+        // Add a small delay between chunks to let the server breathe
+        if (i + CHUNK_SIZE < totalItems) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
       }
 
       await loadPersistentData();
