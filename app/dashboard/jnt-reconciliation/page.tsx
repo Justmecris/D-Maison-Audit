@@ -286,8 +286,26 @@ export default function JntReconciliation() {
               throw new Error(`Server error (${response.status}): ${text.substring(0, 100)}`);
             }
 
-            success = true;
-          } catch (fetchError: any) {
+            // Incrementally update manifest so user sees counts rising
+            const chunkData = chunk.map(c => ({
+              invoiceNumber: c.invoiceNumber,
+              customerName: c.customerName,
+              scanned: false,
+              scanTime: undefined,
+              isDuplicate: false
+            }));
+
+            setManifest(prev => {
+              const newMap = new Map(prev.map(item => [item.invoiceNumber, item]));
+              chunkData.forEach(item => {
+                if (!newMap.has(item.invoiceNumber)) {
+                  newMap.set(item.invoiceNumber, item);
+                }
+              });
+              return Array.from(newMap.values());
+            });
+
+            success = true;          } catch (fetchError: any) {
             if (fetchError.name === 'AbortError') throw fetchError;
             if (retries < maxRetries) {
               retries++;

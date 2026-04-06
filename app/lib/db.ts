@@ -133,11 +133,25 @@ const ensureDb = () => {
 export const dbService = {
   getAllInvoices: async (): Promise<InvoiceRecord[]> => {
     if (ensureDb()) {
-      const { data, error } = await supabase!.from('invoices').select('*').order('synced_at', { ascending: false });
-      if (error) throw error;
-      return data as InvoiceRecord[];
+      try {
+        const { data, error } = await supabase!.from('invoices').select('*').order('synced_at', { ascending: false });
+        if (error) throw error;
+        return data as InvoiceRecord[];
+      } catch (err) {
+        console.warn('Supabase: synced_at column missing or error. Falling back to simple select.');
+        const { data, error } = await supabase!.from('invoices').select('*');
+        if (error) throw error;
+        return data as InvoiceRecord[];
+      }
     }
-    return getDb().prepare('SELECT * FROM invoices ORDER BY synced_at DESC').all() as InvoiceRecord[];
+    
+    const database = getDb();
+    try {
+      return database.prepare('SELECT * FROM invoices ORDER BY synced_at DESC').all() as InvoiceRecord[];
+    } catch (err) {
+      console.warn('SQLite: synced_at column missing. Falling back to simple select.');
+      return database.prepare('SELECT * FROM invoices').all() as InvoiceRecord[];
+    }
   },
 
   upsertInvoice: async (invoice: Partial<InvoiceRecord>) => {
