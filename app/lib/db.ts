@@ -165,8 +165,12 @@ export const dbService = {
         is_duplicate: isDuplicate
       };
 
-      // Only set status if explicitly provided OR if it's a new record
-      if (invoice.status) {
+      // Never overwrite VERIFIED with PENDING
+      if (invoice.status === 'VERIFIED') {
+        payload.status = 'VERIFIED';
+      } else if (existing?.status === 'VERIFIED') {
+        payload.status = 'VERIFIED';
+      } else if (invoice.status) {
         payload.status = invoice.status;
       } else if (!existing) {
         payload.status = 'PENDING';
@@ -186,10 +190,13 @@ export const dbService = {
       ON CONFLICT(invoice_number) DO UPDATE SET
         customer_name = COALESCE(excluded.customer_name, invoices.customer_name),
         is_duplicate = 1,
-        status = COALESCE(?, invoices.status)
+        status = CASE 
+          WHEN excluded.status = 'VERIFIED' OR invoices.status = 'VERIFIED' THEN 'VERIFIED'
+          ELSE COALESCE(excluded.status, invoices.status, 'PENDING')
+        END
     `);
 
-    return stmt.run(invoice.invoice_number, invoice.customer_name, invoice.status || (existing ? null : 'PENDING'), isDuplicate, invoice.status || null);
+    return stmt.run(invoice.invoice_number, invoice.customer_name, invoice.status || (existing ? null : 'PENDING'), isDuplicate);
   },
 
   updateScanStatus: async (invoiceNumber: string, status: string, scanTime: string) => {
@@ -257,8 +264,10 @@ export const dbService = {
           is_duplicate: existingMap.has(i.invoice_number!) ? 1 : 0
         };
         
-        // Preserve status if it exists and no new status is provided
-        if (i.status) {
+        // Never overwrite VERIFIED with PENDING
+        if (i.status === 'VERIFIED' || currentStatus === 'VERIFIED') {
+          payload.status = 'VERIFIED';
+        } else if (i.status) {
           payload.status = i.status;
         } else if (!existingMap.has(i.invoice_number!)) {
           payload.status = 'PENDING';
@@ -279,7 +288,10 @@ export const dbService = {
       ON CONFLICT(invoice_number) DO UPDATE SET
         customer_name = COALESCE(excluded.customer_name, invoices.customer_name),
         is_duplicate = 1,
-        status = COALESCE(?, invoices.status)
+        status = CASE 
+          WHEN excluded.status = 'VERIFIED' OR invoices.status = 'VERIFIED' THEN 'VERIFIED'
+          ELSE COALESCE(excluded.status, invoices.status, 'PENDING')
+        END
     `);
 
     const selectStmt = database.prepare('SELECT status FROM invoices WHERE invoice_number = ?');
@@ -292,8 +304,7 @@ export const dbService = {
           item.invoice_number, 
           item.customer_name, 
           item.status || (existing ? null : 'PENDING'), 
-          isDuplicate,
-          item.status || null
+          isDuplicate
         );
       }
     });

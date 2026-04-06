@@ -51,7 +51,7 @@ export async function POST(req: Request) {
         const invoicesToUpsert = validItems.map((item: any) => ({
           invoice_number: item.invoiceNumber,
           customer_name: item.customerName || 'Unknown',
-          status: item.status || 'PENDING'
+          status: item.status
         }));
 
         await dbService.bulkUpsertInvoices(invoicesToUpsert);
@@ -102,7 +102,7 @@ export async function POST(req: Request) {
       await dbService.upsertInvoice({
         invoice_number: invoiceNumber,
         customer_name: customerName,
-        status: status || 'PENDING'
+        status: status
       });
     }
 

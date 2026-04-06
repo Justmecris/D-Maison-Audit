@@ -128,7 +128,7 @@ const processBuffer = async (buffer: ArrayBuffer) => {
       await dbService.upsertInvoice({
         invoice_number: inv.invoiceNumber,
         customer_name: inv.customerName,
-        status: 'PENDING'
+        // Removed status: 'PENDING'
       });
     }
 
