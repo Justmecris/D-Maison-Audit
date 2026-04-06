@@ -24,6 +24,13 @@ const getDb = () => {
       )
     `);
 
+    // Migration: Add synced_at if it doesn't exist (for existing databases)
+    const tableInfo = db.prepare("PRAGMA table_info(invoices)").all();
+    const hasSyncedAt = tableInfo.some((col: any) => col.name === 'synced_at');
+    if (!hasSyncedAt) {
+      db.exec("ALTER TABLE invoices ADD COLUMN synced_at TEXT DEFAULT CURRENT_TIMESTAMP");
+    }
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS jnt_verification_logs (
         log_id INTEGER PRIMARY KEY AUTOINCREMENT,
