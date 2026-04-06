@@ -46,7 +46,7 @@ export default function PaymentAuditPage() {
 
   const parseData = (rawData: any[]) => {
     // Assuming first row is headers
-    const headers = rawData[0].map((h: any) => String(h).toLowerCase().trim());
+    const headers: string[] = rawData[0].map((h: any) => String(h).toLowerCase().trim());
     const rows = rawData.slice(1);
 
     const getIdx = (possibleNames: string[]) => {
