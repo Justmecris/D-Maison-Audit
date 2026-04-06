@@ -28,6 +28,7 @@ export default function JntReconciliation() {
   const [isSessionLocked, setIsSessionLocked] = useState(false);
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
+  const [verifiedCount, setVerifiedCount] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -82,7 +83,7 @@ export default function JntReconciliation() {
     try {
       const res = await fetch('/api/sync/sheets');
       const result = await res.json();
-      if (result.success && result.data) {
+      if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
         const incoming = result.data.map((item: any) => ({
           invoiceNumber: item.invoice_number,
           customerName: item.customer_name,
@@ -90,6 +91,9 @@ export default function JntReconciliation() {
           scanTime: item.scanned_at,
           isDuplicate: !!item.is_duplicate
         }));
+
+        const serverVerifiedCount = incoming.filter(i => i.scanned).length;
+        setVerifiedCount(prev => Math.max(prev, serverVerifiedCount));
 
         setManifest(prev => {
           // If manifest is empty, just take incoming
@@ -144,6 +148,9 @@ export default function JntReconciliation() {
         ? { ...m, scanned: true, scanTime } 
         : m
     ));
+
+    // Increment verified count using functional update
+    setVerifiedCount(prev => prev + 1);
 
     setLastScanned(`${item.customerName} - #${item.invoiceNumber}`);
     setHighlightedInvoice(item.invoiceNumber);
@@ -414,7 +421,7 @@ export default function JntReconciliation() {
 
   const stats = {
     total: manifest.length,
-    scanned: manifest.filter(m => m.scanned).length,
+    scanned: Math.max(verifiedCount, manifest.filter(m => m.scanned).length),
     remaining: manifest.filter(m => !m.scanned).length,
     duplicates: manifest.filter(m => m.isDuplicate).length
   };
