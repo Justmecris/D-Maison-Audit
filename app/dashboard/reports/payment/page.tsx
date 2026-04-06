@@ -26,6 +26,7 @@ interface PaymentAuditItem {
   grand_total: number;
   discrepancy: string;
   audit_date: string;
+  confirmed_at?: string;
 }
 
 export default function PaymentAuditPage() {
