@@ -111,27 +111,30 @@ export default function JntReconciliation() {
           // If manifest is empty, just take incoming
           if (prev.length === 0) return incoming;
 
-          // Merge logic
-          // Create a map of prev items for faster lookup, using lowercased invoice numbers
-          const prevMap = new Map(prev.map(p => [p.invoiceNumber.toLowerCase(), p]));
+          // Start with a map of all previous items for additive merging
+          const mergedMap = new Map(prev.map(p => [p.invoiceNumber.toLowerCase(), p]));
 
-          return incoming.map(item => {
-            const local = prevMap.get(item.invoiceNumber.toLowerCase());
+          // Update/Add items from server
+          incoming.forEach(item => {
+            const key = item.invoiceNumber.toLowerCase();
+            const local = mergedMap.get(key);
             
-            // Priority 1: Keep local state if it's currently being verified (pendingVerifications)
-            // Use case-insensitive check for pendingVerifications too
-            const isPending = Array.from(pendingVerifications).some(pv => pv.toLowerCase() === item.invoiceNumber.toLowerCase());
-            if (isPending) {
-              return local || item;
+            // Priority 1: Keep local state if it's currently being verified
+            const isPending = Array.from(pendingVerifications).some(pv => pv.toLowerCase() === key);
+            if (isPending && local) {
+              return; // Keep local
             }
 
             // Priority 2: Keep local 'scanned' status if it's truer than the server's
             if (local && local.scanned && !item.scanned) {
-              return { ...item, scanned: true, scanTime: local.scanTime };
+              mergedMap.set(key, { ...item, scanned: true, scanTime: local.scanTime });
+            } else {
+              // Otherwise, use server's data (updates names, status from server)
+              mergedMap.set(key, item);
             }
-
-            return item;
           });
+
+          return Array.from(mergedMap.values());
         });
       }
     } catch (error) {
@@ -351,10 +354,11 @@ export default function JntReconciliation() {
             }));
 
             setManifest(prev => {
-              const newMap = new Map(prev.map(item => [item.invoiceNumber, item]));
+              const newMap = new Map(prev.map(item => [item.invoiceNumber.toLowerCase(), item]));
               chunkData.forEach(item => {
-                if (!newMap.has(item.invoiceNumber)) {
-                  newMap.set(item.invoiceNumber, item);
+                const key = item.invoiceNumber.toLowerCase();
+                if (!newMap.has(key)) {
+                  newMap.set(key, item);
                 }
               });
               return Array.from(newMap.values());
