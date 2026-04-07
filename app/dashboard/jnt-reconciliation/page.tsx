@@ -96,7 +96,7 @@ export default function JntReconciliation() {
       const res = await fetch('/api/sync/sheets');
       const result = await res.json();
       if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
-        const incoming = result.data.map((item: any) => ({
+        const incoming: ManifestItem[] = result.data.map((item: any) => ({
           invoiceNumber: item.invoice_number,
           customerName: item.customer_name,
           scanned: item.status === 'VERIFIED',
@@ -458,6 +458,20 @@ export default function JntReconciliation() {
     );
   };
 
+  const handleStartSession = () => {
+    if (!staffName) {
+      alert('Please select a staff member first.');
+      return;
+    }
+    localStorage.setItem('jnt_active_staff', staffName);
+    setIsSessionLocked(true);
+  };
+
+  const handleSwitchStaff = () => {
+    localStorage.removeItem('jnt_active_staff');
+    setIsSessionLocked(false);
+  };
+
   const stats = {
     total: manifest.length,
     scanned: Math.max(verifiedCount, manifest.filter(m => m.scanned).length),
@@ -689,7 +703,13 @@ export default function JntReconciliation() {
   );
 }
 
-function StatCard({ label, value, color = 'slate', onClick, active }: any) {
+function StatCard({ label, value, color = 'slate', onClick, active }: { 
+  label: string; 
+  value: number; 
+  color?: 'slate' | 'emerald' | 'rose' | 'amber'; 
+  onClick?: () => void; 
+  active?: boolean; 
+}) {
   const styles: any = {
     slate: active ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-100 text-slate-900',
     emerald: active ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-emerald-50 border-emerald-100 text-emerald-900',

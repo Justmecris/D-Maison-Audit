@@ -279,7 +279,7 @@ export const dbService = {
   bulkUpsertInvoices: async (invoices: Partial<InvoiceRecord>[]) => {
     if (ensureDb()) {
       const invoiceNumbers = invoices.map(i => i.invoice_number).filter(Boolean) as string[];
-      const { data: existing } = await supabase!.from('invoices').select('invoice_number, status, scanned_at, is_duplicate').in('invoice_number', invoiceNumbers);
+      const { data: existing } = await supabase!.from('invoices').select('invoice_number, customer_name, status, scanned_at, is_duplicate').in('invoice_number', invoiceNumbers);
       const existingMap = new Map(existing?.map(e => [e.invoice_number, e]));
 
       const toUpsert = invoices.map(i => {
@@ -293,7 +293,7 @@ export const dbService = {
         };
         
         // Never overwrite VERIFIED with PENDING
-        if (currentStatus === 'VERIFIED') {
+        if (currentStatus === 'VERIFIED' && existingRec) {
           payload.status = 'VERIFIED';
           payload.scanned_at = existingRec.scanned_at;
         } else if (i.status === 'VERIFIED') {
