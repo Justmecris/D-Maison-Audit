@@ -115,14 +115,18 @@ export default function JntReconciliation() {
           return incoming.map(item => {
             const local = prev.find(p => p.invoiceNumber === item.invoiceNumber);
             
-            // Priority 1: Keep local state if it's currently being verified (pendingVerifications)
+            // Priority 1: If it's already verified on the server, keep it verified.
+            if (item.scanned) return item;
+
+            // Priority 2: Keep local state if it's currently being verified (pendingVerifications)
             if (pendingVerifications.has(item.invoiceNumber)) {
               return local || item;
             }
 
-            // Priority 2: Keep local 'scanned' status if it's truer than the server's
-            if (local && local.scanned && !item.scanned) {
-              return { ...item, scanned: true, scanTime: local.scanTime };
+            // Priority 3: Keep local 'scanned' status if it was verified in this session
+            // but the server hasn't reflected it yet.
+            if (local && local.scanned) {
+              return local;
             }
 
             return item;
@@ -147,12 +151,14 @@ export default function JntReconciliation() {
     // Add to pending
     setPendingVerifications(prev => new Set(prev).add(item.invoiceNumber));
     
-    const scanTime = new Date().toLocaleTimeString();
+    // Display short time in UI, but send full ISO to backend
+    const displayTime = new Date().toLocaleTimeString();
+    const fullTimestamp = new Date().toISOString();
     
     // Optimistic UI update
     setManifest(prev => prev.map(m => 
       m.invoiceNumber === item.invoiceNumber 
-        ? { ...m, scanned: true, scanTime } 
+        ? { ...m, scanned: true, scanTime: displayTime } 
         : m
     ));
 
@@ -169,7 +175,7 @@ export default function JntReconciliation() {
         body: JSON.stringify({
           invoiceNumber: item.invoiceNumber,
           status: 'VERIFIED',
-          scanTime: new Date().toISOString(), // Use ISO for backend
+          scanTime: fullTimestamp, 
           staffName,
           selectedDate
         })

@@ -6,28 +6,36 @@ export async function GET() {
   const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
   const RANGE = process.env.GOOGLE_SHEETS_RANGE || 'Sheet1!A:C';
 
-  if (SPREADSHEET_ID) {
-    try {
-      const sheetData = await fetchFromSheets(SPREADSHEET_ID, RANGE);
-      // Only upsert without status to avoid resetting verified ones, 
-      // or handle logic to only add new ones as PENDING
-      for (const item of sheetData) {
-        await dbService.upsertInvoice({
-          invoice_number: item.invoiceNumber,
-          customer_name: item.customerName,
-          // Removed status: 'PENDING' to allow dbService to use default or preserve existing
-        });
-      }
-    } catch (error) {
-      console.error('Google Sheets background sync failed:', error);
-    }
-  }
-
   try {
     const allInvoices = await dbService.getAllInvoices();
+    const existingNumbers = new Set(allInvoices.map(i => i.invoice_number));
+
+    if (SPREADSHEET_ID) {
+      try {
+        const sheetData = await fetchFromSheets(SPREADSHEET_ID, RANGE);
+        // Only upsert items that are genuinely NEW to prevent ANY risk of overwriting status
+        const newItems = sheetData.filter(item => !existingNumbers.has(item.invoiceNumber));
+        
+        if (newItems.length > 0) {
+          console.log(`[BACKGROUND SYNC] Adding ${newItems.length} new invoices from Google Sheets.`);
+          for (const item of newItems) {
+            await dbService.upsertInvoice({
+              invoice_number: item.invoiceNumber,
+              customer_name: item.customerName,
+              status: 'PENDING'
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Google Sheets background sync failed:', error);
+      }
+    }
+
+    // Return the latest data
+    const latestInvoices = await dbService.getAllInvoices();
     return NextResponse.json({ 
       success: true, 
-      data: allInvoices
+      data: latestInvoices
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Database fetch failed' }, { status: 500 });
