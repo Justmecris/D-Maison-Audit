@@ -115,18 +115,14 @@ export default function JntReconciliation() {
           return incoming.map(item => {
             const local = prev.find(p => p.invoiceNumber === item.invoiceNumber);
             
-            // Priority 1: If it's already verified on the server, keep it verified.
-            if (item.scanned) return item;
-
-            // Priority 2: Keep local state if it's currently being verified (pendingVerifications)
+            // Priority 1: Keep local state if it's currently being verified (pendingVerifications)
             if (pendingVerifications.has(item.invoiceNumber)) {
               return local || item;
             }
 
-            // Priority 3: Keep local 'scanned' status if it was verified in this session
-            // but the server hasn't reflected it yet.
-            if (local && local.scanned) {
-              return local;
+            // Priority 2: Keep local 'scanned' status if it's truer than the server's
+            if (local && local.scanned && !item.scanned) {
+              return { ...item, scanned: true, scanTime: local.scanTime };
             }
 
             return item;
@@ -151,14 +147,12 @@ export default function JntReconciliation() {
     // Add to pending
     setPendingVerifications(prev => new Set(prev).add(item.invoiceNumber));
     
-    // Display short time in UI, but send full ISO to backend
-    const displayTime = new Date().toLocaleTimeString();
-    const fullTimestamp = new Date().toISOString();
+    const scanTime = new Date().toLocaleTimeString();
     
     // Optimistic UI update
     setManifest(prev => prev.map(m => 
       m.invoiceNumber === item.invoiceNumber 
-        ? { ...m, scanned: true, scanTime: displayTime } 
+        ? { ...m, scanned: true, scanTime } 
         : m
     ));
 
@@ -175,7 +169,7 @@ export default function JntReconciliation() {
         body: JSON.stringify({
           invoiceNumber: item.invoiceNumber,
           status: 'VERIFIED',
-          scanTime: fullTimestamp, 
+          scanTime: new Date().toISOString(), // Use ISO for backend
           staffName,
           selectedDate
         })
