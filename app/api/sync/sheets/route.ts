@@ -2,22 +2,32 @@ import { NextResponse } from 'next/server';
 import { fetchFromSheets } from '@/app/lib/google-sheets';
 import { dbService } from '@/app/lib/db';
 
-export async function GET() {
+let lastSyncTime = 0;
+const SYNC_COOLDOWN = 1000 * 60 * 5; // 5 minutes
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const forceSync = searchParams.get('sync') === 'true';
+  const currentTime = Date.now();
+
   const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID;
   const RANGE = process.env.GOOGLE_SHEETS_RANGE || 'Sheet1!A:C';
 
-  if (SPREADSHEET_ID) {
+  if (SPREADSHEET_ID && (forceSync || (currentTime - lastSyncTime > SYNC_COOLDOWN))) {
     try {
+      console.log(`[API] Triggering Google Sheets sync. Force: ${forceSync}`);
       const sheetData = await fetchFromSheets(SPREADSHEET_ID, RANGE);
-      // Only upsert without status to avoid resetting verified ones, 
-      // or handle logic to only add new ones as PENDING
-      for (const item of sheetData) {
-        await dbService.upsertInvoice({
+      
+      // Perform bulk upsert instead of individual calls for efficiency
+      if (sheetData.length > 0) {
+        const invoicesToUpsert = sheetData.map(item => ({
           invoice_number: item.invoiceNumber,
-          customer_name: item.customerName,
-          // Removed status: 'PENDING' to allow dbService to use default or preserve existing
-        });
+          customer_name: item.customerName
+        }));
+        await dbService.bulkUpsertInvoices(invoicesToUpsert);
       }
+      
+      lastSyncTime = currentTime;
     } catch (error) {
       console.error('Google Sheets background sync failed:', error);
     }

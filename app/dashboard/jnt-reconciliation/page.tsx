@@ -112,11 +112,16 @@ export default function JntReconciliation() {
           if (prev.length === 0) return incoming;
 
           // Merge logic
+          // Create a map of prev items for faster lookup, using lowercased invoice numbers
+          const prevMap = new Map(prev.map(p => [p.invoiceNumber.toLowerCase(), p]));
+
           return incoming.map(item => {
-            const local = prev.find(p => p.invoiceNumber === item.invoiceNumber);
+            const local = prevMap.get(item.invoiceNumber.toLowerCase());
             
             // Priority 1: Keep local state if it's currently being verified (pendingVerifications)
-            if (pendingVerifications.has(item.invoiceNumber)) {
+            // Use case-insensitive check for pendingVerifications too
+            const isPending = Array.from(pendingVerifications).some(pv => pv.toLowerCase() === item.invoiceNumber.toLowerCase());
+            if (isPending) {
               return local || item;
             }
 

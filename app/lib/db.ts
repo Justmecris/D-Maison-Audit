@@ -15,7 +15,7 @@ const getDb = () => {
     db = new Database(DB_PATH);
     db.exec(`
       CREATE TABLE IF NOT EXISTS invoices (
-        invoice_number TEXT PRIMARY KEY,
+        invoice_number TEXT PRIMARY KEY COLLATE NOCASE,
         customer_name TEXT,
         status TEXT DEFAULT 'PENDING',
         scanned_at TEXT,
@@ -30,6 +30,11 @@ const getDb = () => {
     if (!hasSyncedAt) {
       db.exec("ALTER TABLE invoices ADD COLUMN synced_at TEXT DEFAULT CURRENT_TIMESTAMP");
     }
+
+    // Migration: Add COLLATE NOCASE if it's an existing database
+    // Note: SQLite doesn't easily allow changing collation on a primary key without recreating the table.
+    // However, we can at least ensure all new queries use case-insensitive matching if needed.
+    // But for a new setup, the above CREATE TABLE handles it.
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS jnt_verification_logs (
@@ -155,16 +160,20 @@ export const dbService = {
   },
 
   upsertInvoice: async (invoice: Partial<InvoiceRecord>) => {
+    if (!invoice.invoice_number) return;
+    
     if (ensureDb()) {
       const { data: existing } = await supabase!.from('invoices').select('*').eq('invoice_number', invoice.invoice_number).single();
-      const isDuplicate = existing ? 1 : 0;
       
       const payload: any = {
         invoice_number: invoice.invoice_number,
         customer_name: invoice.customer_name || existing?.customer_name,
-        is_duplicate: isDuplicate,
         synced_at: new Date().toISOString()
       };
+
+      // Only set is_duplicate if it's already in the DB and we aren't just updating it
+      // For now, let's just preserve the existing is_duplicate or set it if specifically requested
+      payload.is_duplicate = existing ? (existing.is_duplicate || 0) : 0;
 
       // Never overwrite VERIFIED with PENDING
       if (existing?.status === 'VERIFIED') {
@@ -182,23 +191,23 @@ export const dbService = {
       return;
     }
     const database = getDb();
-    const existing = database.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(invoice.invoice_number);
-    const isDuplicate = existing ? 1 : 0;
+    // Use LOWER() for case-insensitive lookup
+    const existing = database.prepare('SELECT * FROM invoices WHERE LOWER(invoice_number) = LOWER(?)').get(invoice.invoice_number);
+    const isDuplicate = existing ? (existing.is_duplicate || 0) : 0;
 
     const stmt = database.prepare(`
       INSERT INTO invoices (invoice_number, customer_name, status, is_duplicate, synced_at, scanned_at)
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
       ON CONFLICT(invoice_number) DO UPDATE SET
         customer_name = COALESCE(excluded.customer_name, invoices.customer_name),
-        is_duplicate = 1,
         synced_at = CURRENT_TIMESTAMP,
         scanned_at = CASE
           WHEN excluded.status = 'VERIFIED' THEN COALESCE(excluded.scanned_at, invoices.scanned_at, CURRENT_TIMESTAMP)
           ELSE invoices.scanned_at
         END,
         status = CASE 
-          WHEN invoices.status = 'VERIFIED' OR excluded.status = 'VERIFIED' THEN 'VERIFIED'
-          ELSE COALESCE(excluded.status, invoices.status, 'PENDING')
+          WHEN invoices.status = 'VERIFIED' OR (SELECT status FROM invoices WHERE invoice_number = excluded.invoice_number) = 'VERIFIED' THEN 'VERIFIED'
+          ELSE COALESCE(excluded.status, (SELECT status FROM invoices WHERE invoice_number = excluded.invoice_number), 'PENDING')
         END
     `);
 
@@ -222,10 +231,11 @@ export const dbService = {
       if (error) throw error;
       return;
     }
+    // Use LOWER() for case-insensitive update
     const stmt = getDb().prepare(`
       UPDATE invoices 
       SET status = ?, scanned_at = ?, synced_at = CURRENT_TIMESTAMP
-      WHERE invoice_number = ?
+      WHERE LOWER(invoice_number) = LOWER(?)
     `);
     return stmt.run(status, scanTime || fullTimestamp, invoiceNumber);
   },
@@ -269,7 +279,7 @@ export const dbService = {
   bulkUpsertInvoices: async (invoices: Partial<InvoiceRecord>[]) => {
     if (ensureDb()) {
       const invoiceNumbers = invoices.map(i => i.invoice_number).filter(Boolean) as string[];
-      const { data: existing } = await supabase!.from('invoices').select('invoice_number, status, scanned_at').in('invoice_number', invoiceNumbers);
+      const { data: existing } = await supabase!.from('invoices').select('invoice_number, status, scanned_at, is_duplicate').in('invoice_number', invoiceNumbers);
       const existingMap = new Map(existing?.map(e => [e.invoice_number, e]));
 
       const toUpsert = invoices.map(i => {
@@ -278,7 +288,7 @@ export const dbService = {
         const payload: any = {
           invoice_number: i.invoice_number,
           customer_name: i.customer_name || existingRec?.customer_name,
-          is_duplicate: existingRec ? 1 : 0,
+          is_duplicate: existingRec?.is_duplicate || 0,
           synced_at: new Date().toISOString()
         };
         
@@ -307,24 +317,25 @@ export const dbService = {
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
       ON CONFLICT(invoice_number) DO UPDATE SET
         customer_name = COALESCE(excluded.customer_name, invoices.customer_name),
-        is_duplicate = 1,
         synced_at = CURRENT_TIMESTAMP,
         scanned_at = CASE
           WHEN excluded.status = 'VERIFIED' THEN COALESCE(excluded.scanned_at, invoices.scanned_at, CURRENT_TIMESTAMP)
           ELSE invoices.scanned_at
         END,
         status = CASE 
-          WHEN invoices.status = 'VERIFIED' OR excluded.status = 'VERIFIED' THEN 'VERIFIED'
-          ELSE COALESCE(excluded.status, invoices.status, 'PENDING')
+          WHEN invoices.status = 'VERIFIED' OR (SELECT status FROM invoices WHERE invoice_number = excluded.invoice_number) = 'VERIFIED' THEN 'VERIFIED'
+          ELSE COALESCE(excluded.status, (SELECT status FROM invoices WHERE invoice_number = excluded.invoice_number), 'PENDING')
         END
     `);
 
-    const selectStmt = database.prepare('SELECT status, customer_name FROM invoices WHERE invoice_number = ?');
+    // Use LOWER() for case-insensitive lookup
+    const selectStmt = database.prepare('SELECT status, customer_name, is_duplicate FROM invoices WHERE LOWER(invoice_number) = LOWER(?)');
 
     const transaction = database.transaction((items: Partial<InvoiceRecord>[]) => {
       for (const item of items) {
+        if (!item.invoice_number) continue;
         const existing = selectStmt.get(item.invoice_number);
-        const isDuplicate = existing ? 1 : 0;
+        const isDuplicate = existing ? (existing.is_duplicate || 0) : 0;
         insertStmt.run(
           item.invoice_number, 
           item.customer_name || (existing ? existing.customer_name : null), 
