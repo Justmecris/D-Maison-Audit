@@ -161,19 +161,20 @@ export const dbService = {
       
       const payload: any = {
         invoice_number: invoice.invoice_number,
-        customer_name: invoice.customer_name,
-        is_duplicate: isDuplicate
+        customer_name: invoice.customer_name || existing?.customer_name,
+        is_duplicate: isDuplicate,
+        synced_at: new Date().toISOString()
       };
 
       // Never overwrite VERIFIED with PENDING
-      if (invoice.status === 'VERIFIED') {
+      if (existing?.status === 'VERIFIED') {
         payload.status = 'VERIFIED';
-      } else if (existing?.status === 'VERIFIED') {
+        payload.scanned_at = existing.scanned_at;
+      } else if (invoice.status === 'VERIFIED') {
         payload.status = 'VERIFIED';
-      } else if (invoice.status) {
-        payload.status = invoice.status;
-      } else if (!existing) {
-        payload.status = 'PENDING';
+        payload.scanned_at = invoice.scanned_at || new Date().toISOString();
+      } else {
+        payload.status = invoice.status || existing?.status || 'PENDING';
       }
 
       const { error } = await supabase!.from('invoices').upsert(payload);
@@ -185,32 +186,48 @@ export const dbService = {
     const isDuplicate = existing ? 1 : 0;
 
     const stmt = database.prepare(`
-      INSERT INTO invoices (invoice_number, customer_name, status, is_duplicate)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO invoices (invoice_number, customer_name, status, is_duplicate, synced_at, scanned_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
       ON CONFLICT(invoice_number) DO UPDATE SET
         customer_name = COALESCE(excluded.customer_name, invoices.customer_name),
         is_duplicate = 1,
+        synced_at = CURRENT_TIMESTAMP,
+        scanned_at = CASE
+          WHEN excluded.status = 'VERIFIED' THEN COALESCE(excluded.scanned_at, invoices.scanned_at, CURRENT_TIMESTAMP)
+          ELSE invoices.scanned_at
+        END,
         status = CASE 
-          WHEN excluded.status = 'VERIFIED' OR invoices.status = 'VERIFIED' THEN 'VERIFIED'
+          WHEN invoices.status = 'VERIFIED' OR excluded.status = 'VERIFIED' THEN 'VERIFIED'
           ELSE COALESCE(excluded.status, invoices.status, 'PENDING')
         END
     `);
 
-    return stmt.run(invoice.invoice_number, invoice.customer_name, invoice.status || (existing ? null : 'PENDING'), isDuplicate);
+    return stmt.run(
+      invoice.invoice_number, 
+      invoice.customer_name, 
+      invoice.status || (existing ? existing.status : 'PENDING'), 
+      isDuplicate,
+      invoice.scanned_at || null
+    );
   },
 
   updateScanStatus: async (invoiceNumber: string, status: string, scanTime: string) => {
+    const fullTimestamp = new Date().toISOString();
     if (ensureDb()) {
-      const { error } = await supabase!.from('invoices').update({ status, scanned_at: scanTime }).eq('invoice_number', invoiceNumber);
+      const { error } = await supabase!.from('invoices').update({ 
+        status, 
+        scanned_at: scanTime || fullTimestamp,
+        synced_at: fullTimestamp
+      }).eq('invoice_number', invoiceNumber);
       if (error) throw error;
       return;
     }
     const stmt = getDb().prepare(`
       UPDATE invoices 
-      SET status = ?, scanned_at = ?
+      SET status = ?, scanned_at = ?, synced_at = CURRENT_TIMESTAMP
       WHERE invoice_number = ?
     `);
-    return stmt.run(status, scanTime, invoiceNumber);
+    return stmt.run(status, scanTime || fullTimestamp, invoiceNumber);
   },
 
   addVerificationLog: async (log: Omit<JntVerificationLog, 'log_id' | 'timestamp' | 'sync_status'>) => {
@@ -252,25 +269,28 @@ export const dbService = {
   bulkUpsertInvoices: async (invoices: Partial<InvoiceRecord>[]) => {
     if (ensureDb()) {
       const invoiceNumbers = invoices.map(i => i.invoice_number).filter(Boolean) as string[];
-      // Optimization: Fetch existing in one go to mark duplicates and preserve status
-      const { data: existing } = await supabase!.from('invoices').select('invoice_number, status').in('invoice_number', invoiceNumbers);
-      const existingMap = new Map(existing?.map(e => [e.invoice_number, e.status]));
+      const { data: existing } = await supabase!.from('invoices').select('invoice_number, status, scanned_at').in('invoice_number', invoiceNumbers);
+      const existingMap = new Map(existing?.map(e => [e.invoice_number, e]));
 
       const toUpsert = invoices.map(i => {
-        const currentStatus = existingMap.get(i.invoice_number!);
+        const existingRec = existingMap.get(i.invoice_number!);
+        const currentStatus = existingRec?.status;
         const payload: any = {
           invoice_number: i.invoice_number,
-          customer_name: i.customer_name,
-          is_duplicate: existingMap.has(i.invoice_number!) ? 1 : 0
+          customer_name: i.customer_name || existingRec?.customer_name,
+          is_duplicate: existingRec ? 1 : 0,
+          synced_at: new Date().toISOString()
         };
         
         // Never overwrite VERIFIED with PENDING
-        if (i.status === 'VERIFIED' || currentStatus === 'VERIFIED') {
+        if (currentStatus === 'VERIFIED') {
           payload.status = 'VERIFIED';
-        } else if (i.status) {
-          payload.status = i.status;
-        } else if (!existingMap.has(i.invoice_number!)) {
-          payload.status = 'PENDING';
+          payload.scanned_at = existingRec.scanned_at;
+        } else if (i.status === 'VERIFIED') {
+          payload.status = 'VERIFIED';
+          payload.scanned_at = i.scanned_at || new Date().toISOString();
+        } else {
+          payload.status = i.status || currentStatus || 'PENDING';
         }
         
         return payload;
@@ -283,18 +303,23 @@ export const dbService = {
 
     const database = getDb();
     const insertStmt = database.prepare(`
-      INSERT INTO invoices (invoice_number, customer_name, status, is_duplicate)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO invoices (invoice_number, customer_name, status, is_duplicate, synced_at, scanned_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
       ON CONFLICT(invoice_number) DO UPDATE SET
         customer_name = COALESCE(excluded.customer_name, invoices.customer_name),
         is_duplicate = 1,
+        synced_at = CURRENT_TIMESTAMP,
+        scanned_at = CASE
+          WHEN excluded.status = 'VERIFIED' THEN COALESCE(excluded.scanned_at, invoices.scanned_at, CURRENT_TIMESTAMP)
+          ELSE invoices.scanned_at
+        END,
         status = CASE 
-          WHEN excluded.status = 'VERIFIED' OR invoices.status = 'VERIFIED' THEN 'VERIFIED'
+          WHEN invoices.status = 'VERIFIED' OR excluded.status = 'VERIFIED' THEN 'VERIFIED'
           ELSE COALESCE(excluded.status, invoices.status, 'PENDING')
         END
     `);
 
-    const selectStmt = database.prepare('SELECT status FROM invoices WHERE invoice_number = ?');
+    const selectStmt = database.prepare('SELECT status, customer_name FROM invoices WHERE invoice_number = ?');
 
     const transaction = database.transaction((items: Partial<InvoiceRecord>[]) => {
       for (const item of items) {
@@ -302,9 +327,10 @@ export const dbService = {
         const isDuplicate = existing ? 1 : 0;
         insertStmt.run(
           item.invoice_number, 
-          item.customer_name, 
-          item.status || (existing ? null : 'PENDING'), 
-          isDuplicate
+          item.customer_name || (existing ? existing.customer_name : null), 
+          item.status || (existing ? existing.status : 'PENDING'), 
+          isDuplicate,
+          item.scanned_at || null
         );
       }
     });

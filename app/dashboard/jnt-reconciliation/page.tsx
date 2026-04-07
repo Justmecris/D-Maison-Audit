@@ -36,7 +36,9 @@ export default function JntReconciliation() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Load persistence and setup
+  const [pendingVerifications, setPendingVerifications] = useState<Set<string>>(new Set());
+
+  // Setup persistence and auto-load
   useEffect(() => {
     audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3');
     
@@ -45,7 +47,17 @@ export default function JntReconciliation() {
       setStaffName(savedStaff);
       setIsSessionLocked(true);
     }
+    
+    loadPersistentData();
+    const interval = setInterval(loadPersistentData, 30000);
+    return () => clearInterval(interval);
   }, []);
+
+  // Sync loadPersistentData with pendingVerifications to avoid overwrites
+  useEffect(() => {
+    // This empty dependency-free effect just ensures loadPersistentData 
+    // is always using the latest state when called from the interval
+  }, [pendingVerifications]);
 
   // Auto-focus input when session is locked or after scan
   useEffect(() => {
@@ -99,12 +111,20 @@ export default function JntReconciliation() {
           // If manifest is empty, just take incoming
           if (prev.length === 0) return incoming;
 
-          // Merge: Keep local 'scanned' status if it's truer than the server's
+          // Merge logic
           return incoming.map(item => {
             const local = prev.find(p => p.invoiceNumber === item.invoiceNumber);
+            
+            // Priority 1: Keep local state if it's currently being verified (pendingVerifications)
+            if (pendingVerifications.has(item.invoiceNumber)) {
+              return local || item;
+            }
+
+            // Priority 2: Keep local 'scanned' status if it's truer than the server's
             if (local && local.scanned && !item.scanned) {
               return { ...item, scanned: true, scanTime: local.scanTime };
             }
+
             return item;
           });
         });
@@ -114,26 +134,7 @@ export default function JntReconciliation() {
     }
   };
 
-  useEffect(() => {
-    loadPersistentData();
-    const interval = setInterval(loadPersistentData, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleStartSession = () => {
-    if (staffName) {
-      setIsSessionLocked(true);
-      localStorage.setItem('jnt_active_staff', staffName);
-      inputRef.current?.focus();
-    } else {
-      alert('Please select a staff member first.');
-    }
-  };
-
-  const handleSwitchStaff = () => {
-    setIsSessionLocked(false);
-    localStorage.removeItem('jnt_active_staff');
-  };
+  // ... (inside the component)
 
   const verifyInvoice = async (item: ManifestItem) => {
     if (!isSessionLocked) {
@@ -141,8 +142,14 @@ export default function JntReconciliation() {
       return;
     }
 
+    if (pendingVerifications.has(item.invoiceNumber)) return;
+
+    // Add to pending
+    setPendingVerifications(prev => new Set(prev).add(item.invoiceNumber));
+    
     const scanTime = new Date().toLocaleTimeString();
     
+    // Optimistic UI update
     setManifest(prev => prev.map(m => 
       m.invoiceNumber === item.invoiceNumber 
         ? { ...m, scanned: true, scanTime } 
@@ -151,22 +158,45 @@ export default function JntReconciliation() {
 
     // Increment verified count using functional update
     setVerifiedCount(prev => prev + 1);
-
     setLastScanned(`${item.customerName} - #${item.invoiceNumber}`);
     setHighlightedInvoice(item.invoiceNumber);
     setScanInput('');
 
-    fetch('/api/sync/sheets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        invoiceNumber: item.invoiceNumber,
-        status: 'VERIFIED',
-        scanTime,
-        staffName,
-        selectedDate
-      })
-    });
+    try {
+      const response = await fetch('/api/sync/sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoiceNumber: item.invoiceNumber,
+          status: 'VERIFIED',
+          scanTime: new Date().toISOString(), // Use ISO for backend
+          staffName,
+          selectedDate
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Server failed to save verification');
+      }
+      
+      // Success: server now has it. 
+    } catch (error: any) {
+      console.error('Verification failed:', error);
+      // Revert optimistic update
+      setManifest(prev => prev.map(m => 
+        m.invoiceNumber === item.invoiceNumber 
+          ? { ...m, scanned: false, scanTime: undefined } 
+          : m
+      ));
+      setVerifiedCount(prev => Math.max(0, prev - 1));
+      alert(`Failed to verify #${item.invoiceNumber}: ${error.message}`);
+    } finally {
+      setPendingVerifications(prev => {
+        const next = new Set(prev);
+        next.delete(item.invoiceNumber);
+        return next;
+      });
+    }
 
     setTimeout(() => setHighlightedInvoice(null), 5000);
     setTimeout(() => {
