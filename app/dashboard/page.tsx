@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { EXPECTED_PARCELS } from '@/app/lib/data';
+import { motion } from 'framer-motion';
 
 interface AuditMatch {
   invoiceNumber: string;
@@ -10,19 +11,48 @@ interface AuditMatch {
   status: 'received' | 'missing';
 }
 
+interface SalesData {
+  monthlyTotal: number;
+  monthlyCount: number;
+  dailyStats: { date: string; total: number; count: number }[];
+}
+
 export default function Dashboard() {
+  const [salesData, setSalesData] = useState<SalesData | null>(null);
+  const [isLoadingSales, setIsLoadingSales] = useState(true);
+  const [currentMonth, setCurrentMonth] = useState(new Date().toISOString().substring(0, 7));
+
+  useEffect(() => {
+    fetchSalesData();
+  }, [currentMonth]);
+
+  const fetchSalesData = async () => {
+    setIsLoadingSales(true);
+    try {
+      const res = await fetch(`/api/dashboard/sales?month=${currentMonth}`);
+      const result = await res.json();
+      if (result.success) {
+        setSalesData(result.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch sales data:', error);
+    } finally {
+      setIsLoadingSales(false);
+    }
+  };
+
   // --- Dashboard Stats ---
   const stats = [
-    { name: 'Total Inventory Value', value: '$1,284,000', change: '+2.5%', icon: (
+    { name: 'Total Inventory Value', value: '₱1,284,000', change: '+2.5%', icon: (
       <svg className="w-6 h-6 text-[#947a46]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
     ) },
-    { name: 'Active Repair Tickets', value: '24', change: '4 Ready', icon: (
-      <svg className="w-6 h-6 text-[#947a46]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+    { name: 'Confirmed Sales', value: salesData ? `${salesData.monthlyCount}` : '...', change: 'Audit Records', icon: (
+      <svg className="w-6 h-6 text-[#947a46]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
     ) },
-    { name: 'Monthly Sales Revenue', value: '$342,500', change: '+12%', icon: (
+    { name: 'Confirmed Revenue', value: salesData ? `₱${salesData.monthlyTotal.toLocaleString()}` : '...', change: `Period: ${currentMonth}`, icon: (
       <svg className="w-6 h-6 text-[#947a46]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
     ) },
-    { name: 'Inventory Count Status', value: '98.2%', change: 'Last count: 2d ago', icon: (
+    { name: 'Sync Health', value: '100%', change: 'All Records Locked', icon: (
       <svg className="w-6 h-6 text-[#947a46]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
     ) },
   ];
@@ -215,18 +245,60 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Existing Charts and Repairs Section */}
+      {/* Live Sales Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-50 flex justify-between items-center">
-            <h2 className="font-black text-slate-900 uppercase tracking-widest text-sm">Recent Sales Performance</h2>
-            <div className="flex space-x-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#947a46]"></span>
-              <span className="w-2.5 h-2.5 rounded-full bg-slate-200"></span>
+        <div className="lg:col-span-2 bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden flex flex-col h-[500px]">
+          <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/30">
+            <div>
+              <h2 className="font-black text-slate-900 uppercase tracking-widest text-sm">Monthly Sales Breakdown</h2>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Aggregated from confirmed audit files</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <input 
+                type="month" 
+                value={currentMonth}
+                onChange={(e) => setCurrentMonth(e.target.value)}
+                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase focus:ring-2 focus:ring-[#947a46] outline-none"
+              />
+              <button onClick={fetchSalesData} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+              </button>
             </div>
           </div>
-          <div className="h-80 bg-slate-50/50 flex items-center justify-center p-8">
-             <p className="text-slate-300 text-xs font-black uppercase tracking-widest italic">Live Sales Chart Visualization</p>
+          <div className="flex-1 overflow-auto">
+            <table className="w-full text-left text-[11px]">
+              <thead className="bg-white sticky top-0 z-10 shadow-sm">
+                <tr>
+                  <th className="px-6 py-4 font-black text-slate-400 uppercase">Audit Date</th>
+                  <th className="px-6 py-4 font-black text-slate-400 uppercase text-right">Daily Total</th>
+                  <th className="px-6 py-4 font-black text-slate-400 uppercase text-right">Orders</th>
+                  <th className="px-6 py-4 font-black text-slate-400 uppercase text-right">Avg / Order</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {salesData?.dailyStats.map((stat, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-4 font-black text-[#0f172a]">{new Date(stat.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).toLowerCase()}</td>
+                    <td className="px-6 py-4 text-right font-black text-[#947a46]">₱{stat.total.toLocaleString()}</td>
+                    <td className="px-6 py-4 text-right font-bold text-slate-500">{stat.count} items</td>
+                    <td className="px-6 py-4 text-right font-bold text-slate-400 italic">₱{(stat.total / stat.count).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                  </tr>
+                ))}
+                {(!salesData || salesData.dailyStats.length === 0) && (
+                  <tr><td colSpan={4} className="px-6 py-20 text-center text-slate-300 italic lowercase tracking-widest">no confirmed sales recorded for this period...</td></tr>
+                )}
+              </tbody>
+              {salesData && salesData.dailyStats.length > 0 && (
+                <tfoot className="bg-slate-900 text-white sticky bottom-0 z-10">
+                  <tr>
+                    <td className="px-6 py-4 font-black uppercase tracking-widest text-[9px]">Monthly Accumulation</td>
+                    <td className="px-6 py-4 text-right font-black text-[#947a46]">₱{salesData.monthlyTotal.toLocaleString()}</td>
+                    <td className="px-6 py-4 text-right font-black text-slate-400">{salesData.monthlyCount}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
           </div>
         </div>
 

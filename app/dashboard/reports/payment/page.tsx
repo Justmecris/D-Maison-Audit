@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'framer-motion';
+import ProgressBar from '@/components/ProgressBar';
 
 interface PaymentAuditItem {
   order_no: string;
@@ -46,132 +47,215 @@ export default function PaymentAuditPage() {
   const [isLoadingDb, setIsLoadingDb] = useState(false);
   const [mounted, setMounted] = useState(false);
 
+  // Progress States
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState('');
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const readerRef = useRef<FileReader | null>(null);
 
   useEffect(() => {
     setMounted(true);
+    const savedItems = localStorage.getItem('payment_audit_staging_items');
+    if (savedItems) {
+      try {
+        setItems(JSON.parse(savedItems));
+      } catch (e) {
+        console.error('Failed to load staging items:', e);
+      }
+    }
   }, []);
 
-  const parseData = (rawData: any[]) => {
-    // Assuming first row is headers
-    const headers: string[] = rawData[0].map((h: any) => String(h).toLowerCase().trim());
-    const rows = rawData.slice(1);
-
-    const getIdx = (possibleNames: string[]) => {
-      return headers.findIndex(h => possibleNames.includes(h));
-    };
-
-    const idx = {
-      no: getIdx(['no.', 'no', 'order no', 'order number']),
-      alt_no: getIdx(['alt no.', 'alt no', 'alternative number']),
-      tracking: getIdx(['tracking number', 'tracking', 'waybill']),
-      customer: getIdx(['customer name', 'customer']),
-      profile: getIdx(['profile name', 'profile']),
-      subtotal: getIdx(['subtotal', 'item subtotal']),
-      shipping: getIdx(['shipping cost', 'shipping', 'shipping fee']),
-      discount: getIdx(['discount']),
-      total: getIdx(['total']),
-      paid_amount: getIdx(['paid amount', 'paid', 'payment amount']),
-      provider: getIdx(['payment provider', 'provider', 'payment method']),
-      acc_no: getIdx(['account no.', 'account no', 'account number']),
-      acc_name: getIdx(['account name', 'payment from']),
-      paid_at: getIdx(['paid at', 'payment date']),
-      sku: getIdx(['sku']),
-      item_name: getIdx(['item name', 'item']),
-      qty: getIdx(['item qty', 'qty', 'quantity']),
-      price: getIdx(['item price', 'price']),
-      grand_total: getIdx(['grand total'])
-    };
-
-    const parsedItems: PaymentAuditItem[] = rows.map(row => {
-      const val = (index: number) => (index !== -1 ? row[index] : '');
-      const num = (index: number) => {
-        const v = val(index);
-        if (typeof v === 'number') return v;
-        return parseFloat(String(v || '0').replace(/[^0-9.-]+/g, '')) || 0;
-      };
-
-      const item_qty = num(idx.qty) || 1;
-      const item_price = num(idx.price);
-      const subtotal = num(idx.subtotal) || (item_qty * item_price);
-      const total = num(idx.total);
-      const paid_amount = num(idx.paid_amount);
-      const shipping_fee = num(idx.shipping);
-
-      const staging_invoice = String(val(idx.no) || val(idx.alt_no));
-      const staging_payment_from = String(val(idx.provider) || val(idx.acc_name) || 'unknown');
-      
-      const has_discrepancy = Math.abs((subtotal + shipping_fee) - paid_amount) > 0.01;
-
-      let discrepancy = '';
-      if (Math.abs(paid_amount - total) > 0.01) {
-        discrepancy = `paid amount (${paid_amount}) does not match total (${total})`;
-      }
-
-      return {
-        order_no: String(val(idx.no)),
-        alt_no: String(val(idx.alt_no)),
-        tracking_number: String(val(idx.tracking)),
-        customer_name: String(val(idx.customer)),
-        profile_name: String(val(idx.profile)),
-        subtotal,
-        shipping_cost: shipping_fee,
-        discount: num(idx.discount),
-        total,
-        paid_amount,
-        payment_provider: String(val(idx.provider)),
-        account_no: String(val(idx.acc_no)),
-        account_name: String(val(idx.acc_name)),
-        paid_at: String(val(idx.paid_at)),
-        sku: String(val(idx.sku)),
-        item_name: String(val(idx.item_name)),
-        item_qty,
-        item_price,
-        grand_total: num(idx.grand_total),
-        discrepancy,
-        audit_date: filterDate,
-        // Staging specific mapping
-        staging_invoice,
-        staging_payment_amount: paid_amount,
-        staging_shipping_fee: shipping_fee,
-        staging_item_total: subtotal,
-        staging_payment_from,
-        has_discrepancy
-      };
-    }).filter(item => item.order_no || item.sku);
-
-    // Validation: sheet grand total vs sum of item subtotals
-    const sumOfItemSubtotals = parsedItems.reduce((acc, curr) => acc + (curr.item_qty * curr.item_price), 0);
-    const reportedGrandTotal = Math.max(...parsedItems.map(i => i.grand_total), 0);
-
-    if (reportedGrandTotal > 0 && Math.abs(reportedGrandTotal - sumOfItemSubtotals) > 0.01) {
-      alert(`warning: sheet grand total (${reportedGrandTotal}) does not match sum of individual item subtotals (${sumOfItemSubtotals})`);
+  useEffect(() => {
+    if (mounted) {
+      localStorage.setItem('payment_audit_staging_items', JSON.stringify(items));
     }
-
-    return parsedItems;
-  };
+  }, [items, mounted]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setIsProcessingFile(true);
+    setUploadProgress(0);
+    setUploadStatus('uploading file...');
+    setUploadError(null);
+    setItems([]);
+
     const reader = new FileReader();
-    reader.onload = (evt) => {
-      const bstr = evt.target?.result;
-      const wb = XLSX.read(bstr, { type: 'binary' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
-      const parsed = parseData(data as any[]);
-      setItems(parsed);
+    readerRef.current = reader;
+
+    reader.onprogress = (evt) => {
+      if (evt.lengthComputable) {
+        const percent = (evt.loaded / evt.total) * 20;
+        setUploadProgress(percent);
+      }
     };
+
+    reader.onload = async (evt) => {
+      try {
+        setUploadStatus('validating headers...');
+        setUploadProgress(20);
+
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+
+        if (data.length === 0) {
+          throw new Error('the uploaded file appears to be empty.');
+        }
+
+        // Find the header row (sometimes accountants have empty rows at the top)
+        let headerRowIndex = 0;
+        let headers: string[] = [];
+        for (let i = 0; i < Math.min(data.length, 10); i++) {
+          const row = data[i];
+          const potentialHeaders = row.map(h => String(h || '').toLowerCase().trim());
+          if (potentialHeaders.includes('no.') || potentialHeaders.includes('invoice number') || potentialHeaders.includes('profile name')) {
+            headerRowIndex = i;
+            headers = potentialHeaders;
+            break;
+          }
+        }
+
+        if (headers.length === 0) {
+          headers = data[0].map(h => String(h || '').toLowerCase().trim());
+        }
+
+        setUploadStatus('processing rows...');
+        const rows = data.slice(headerRowIndex + 1);
+        const totalRows = rows.length;
+        const processedItems: PaymentAuditItem[] = [];
+
+        for (let i = 0; i < totalRows; i++) {
+          const item = parseRow(rows[i], headers);
+          if (item.order_no && item.order_no !== 'UNDEFINED') {
+            processedItems.push(item);
+          }
+
+          if (i % 20 === 0 || i === totalRows - 1) {
+            const rowProgress = 20 + ((i / totalRows) * 60);
+            setUploadProgress(rowProgress);
+            await new Promise(resolve => setTimeout(resolve, 5));
+          }
+        }
+
+        setUploadStatus('finalizing sync...');
+        setUploadProgress(90);
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        setItems(processedItems);
+        setUploadProgress(100);
+        
+        setTimeout(() => {
+          setIsProcessingFile(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }, 1000);
+
+      } catch (err: any) {
+        setUploadError(err.message || 'failed to process file');
+        console.error('Processing error:', err);
+      }
+    };
+
+    reader.onerror = () => {
+      setUploadError('file reading failed');
+    };
+
     reader.readAsBinaryString(file);
+  };
+
+  const parseRow = (row: any[], headers: string[]) => {
+    const getIdx = (possibleNames: string[]) => {
+      return headers.findIndex(h => possibleNames.includes(h));
+    };
+
+    const idx = {
+      invoice: getIdx(['no.', 'invoice number', 'no']),
+      customer: getIdx(['profile name']),
+      shipping: getIdx(['shipping cost']),
+      provider: getIdx(['payment provider']),
+      subtotal: getIdx(['subtotal']),
+      total: getIdx(['total'])
+    };
+
+    const val = (index: number) => {
+      if (index === -1 || index >= row.length) return '';
+      const v = row[index];
+      if (typeof v === 'string') return v.trim().toLowerCase();
+      return v;
+    };
+
+    const num = (index: number) => {
+      const v = val(index);
+      if (typeof v === 'number') return v;
+      if (!v) return 0;
+      return parseFloat(String(v).replace(/[^0-9.-]+/g, '')) || 0;
+    };
+
+    const invoiceRaw = val(idx.invoice);
+    const invoice = invoiceRaw ? String(invoiceRaw).toUpperCase() : '';
+    const customer_name = String(val(idx.customer) || 'unknown');
+    const shipping_fee = num(idx.shipping);
+    const item_total = num(idx.subtotal);
+    const payment_amount = num(idx.total);
+    const payment_from = String(val(idx.provider) || 'unknown');
+    
+    const has_discrepancy = Math.abs((item_total + shipping_fee) - payment_amount) > 0.01;
+    let discrepancy = '';
+    if (has_discrepancy) {
+      discrepancy = `paid amount (${payment_amount}) does not match billed (${(item_total + shipping_fee).toFixed(2)})`;
+    }
+
+    return {
+      order_no: invoice,
+      alt_no: '',
+      tracking_number: '',
+      customer_name: customer_name,
+      profile_name: customer_name,
+      subtotal: item_total,
+      shipping_cost: shipping_fee,
+      discount: 0,
+      total: payment_amount,
+      paid_amount: payment_amount,
+      payment_provider: payment_from,
+      account_no: '',
+      account_name: payment_from,
+      paid_at: '',
+      sku: '',
+      item_name: '',
+      item_qty: 1,
+      item_price: item_total,
+      grand_total: payment_amount,
+      discrepancy,
+      audit_date: filterDate,
+      staging_invoice: invoice,
+      staging_payment_amount: payment_amount,
+      staging_shipping_fee: shipping_fee,
+      staging_item_total: item_total,
+      staging_payment_from: payment_from,
+      has_discrepancy
+    };
+  };
+
+  const cancelUpload = () => {
+    if (readerRef.current) readerRef.current.abort();
+    setIsProcessingFile(false);
+    setUploadStatus('');
+    setUploadProgress(0);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handlePaste = () => {
     const lines = pasteInput.trim().split('\n');
     if (lines.length === 0) return;
     const data = lines.map(line => line.split('\t'));
-    const parsed = parseData(data);
+    const headers = data[0].map(h => String(h || '').toLowerCase().trim());
+    const rows = data.slice(1);
+    const parsed = rows.map(row => parseRow(row, headers)).filter(i => i.order_no);
     setItems(parsed);
   };
 
@@ -223,7 +307,6 @@ export default function PaymentAuditPage() {
     const totalShipping = source.reduce((acc, curr) => acc + curr.shipping_cost, 0);
     const discrepancies = source.filter(i => i.discrepancy || i.has_discrepancy).length;
 
-    // Summary for staging area
     const stagingTotalPayment = items.reduce((acc, curr) => acc + (curr.staging_payment_amount || 0), 0);
     const stagingTotalShipping = items.reduce((acc, curr) => acc + (curr.staging_shipping_fee || 0), 0);
 
@@ -315,6 +398,16 @@ export default function PaymentAuditPage() {
           </div>
 
           <div className="lg:col-span-2 space-y-6">
+             {isProcessingFile && (
+               <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                 <ProgressBar 
+                   progress={uploadProgress} 
+                   status={uploadStatus} 
+                   error={uploadError} 
+                   onCancel={cancelUpload}
+                 />
+               </div>
+             )}
              <div className="bg-white rounded-3xl border border-slate-100 shadow-xl overflow-hidden flex flex-col h-[600px]">
                 <div className="p-6 border-b border-slate-50 bg-slate-50/50 flex justify-between items-center">
                   <h3 className="text-xs font-black text-slate-900 lowercase tracking-widest">staging area: distributed data</h3>
@@ -326,25 +419,27 @@ export default function PaymentAuditPage() {
                   <table className="w-full text-left text-[10px]">
                     <thead className="bg-white sticky top-0 z-10 shadow-sm">
                       <tr>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50">invoice</th>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">payment amount</th>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">shipping fee</th>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">item total</th>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50">payment from</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-left">invoice number</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-left">profile name</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">subtotal</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">shipping cost</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">total amount</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-left">payment provider</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {items.map((item, idx) => (
                         <tr key={idx} className={`hover:bg-slate-50 transition-colors ${item.has_discrepancy ? 'bg-rose-50' : ''}`}>
                           <td className="px-6 py-4 font-bold text-slate-900">#{item.staging_invoice}</td>
-                          <td className="px-6 py-4 text-right font-black">₱{(item.staging_payment_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                          <td className="px-6 py-4 text-right font-bold text-slate-500">₱{(item.staging_shipping_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="px-6 py-4 uppercase font-bold text-slate-500">{item.customer_name}</td>
                           <td className="px-6 py-4 text-right font-bold text-[#947a46]">₱{(item.staging_item_total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="px-6 py-4 text-right font-bold text-slate-500">₱{(item.staging_shipping_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="px-6 py-4 text-right font-black">₱{(item.staging_payment_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                           <td className="px-6 py-4 uppercase font-bold text-slate-400">{item.staging_payment_from}</td>
                         </tr>
                       ))}
                       {items.length === 0 && (
-                        <tr><td colSpan={5} className="px-6 py-20 text-center text-slate-300 italic lowercase tracking-widest">no data staged for audit...</td></tr>
+                        <tr><td colSpan={6} className="px-6 py-20 text-center text-slate-300 italic lowercase tracking-widest">no data staged for audit...</td></tr>
                       )}
                     </tbody>
                     {items.length > 0 && (
@@ -353,7 +448,7 @@ export default function PaymentAuditPage() {
                           <td className="px-6 py-4 text-slate-900 lowercase">total tally</td>
                           <td className="px-6 py-4 text-right text-slate-900">₱{dashboardStats.stagingTotalPayment.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                           <td className="px-6 py-4 text-right text-slate-900">₱{dashboardStats.stagingTotalShipping.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                          <td colSpan={2}></td>
+                          <td colSpan={3}></td>
                         </tr>
                       </tfoot>
                     )}
