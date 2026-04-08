@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
 const inventoryToAudit = [
   { sku: 'DM-RNG-001', name: 'Diamond Solitaire Ring', status: 'IN_STOCK' },
