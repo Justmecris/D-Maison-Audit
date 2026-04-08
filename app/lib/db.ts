@@ -75,6 +75,17 @@ const getDb = () => {
         );
     `);
 
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_history_summary (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month TEXT, -- YYYY-MM
+            total_billed DECIMAL(15, 2),
+            total_received DECIMAL(15, 2),
+            total_orders INTEGER,
+            archived_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
     db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices(invoice_number)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_logs_invoice ON jnt_verification_logs(invoice_number)`);
     return db;
@@ -445,5 +456,54 @@ export const dbService = {
     });
 
     return insertMany(audits);
+  },
+
+  purgeMonthlyData: async () => {
+    const lastMonth = new Date();
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+    const monthStr = lastMonth.toISOString().substring(0, 7); // YYYY-MM
+
+    if (ensureDb()) {
+      // 1. Calculate Summary
+      const { data: audits } = await supabase!.from('payment_audits').select('total, paid_amount').like('audit_date', `${monthStr}%`);
+      const totalBilled = audits?.reduce((acc, curr) => acc + curr.total, 0) || 0;
+      const totalReceived = audits?.reduce((acc, curr) => acc + curr.paid_amount, 0) || 0;
+      const totalOrders = audits?.length || 0;
+
+      // 2. Archive Summary
+      await supabase!.from('audit_history_summary').insert({
+        month: monthStr,
+        total_billed: totalBilled,
+        total_received: totalReceived,
+        total_orders: totalOrders
+      });
+
+      // 3. Purge Transient Data
+      await supabase!.from('payment_audits').delete().like('audit_date', `${monthStr}%`);
+      await supabase!.from('jnt_verification_logs').delete().like('date_processed', `${monthStr}%`);
+      // Note: invoices might be needed long-term, so we only purge if explicitly requested or if we consider them transient.
+      return { month: monthStr, archived: true };
+    }
+
+    const database = getDb();
+    
+    // 1. Calculate Summary
+    const summary = database.prepare(`
+      SELECT SUM(total) as total_billed, SUM(paid_amount) as total_received, COUNT(*) as total_orders
+      FROM payment_audits
+      WHERE audit_date LIKE ?
+    `).get(`${monthStr}%`);
+
+    // 2. Archive Summary
+    database.prepare(`
+      INSERT INTO audit_history_summary (month, total_billed, total_received, total_orders)
+      VALUES (?, ?, ?, ?)
+    `).run(monthStr, summary.total_billed || 0, summary.total_received || 0, summary.total_orders || 0);
+
+    // 3. Purge Transient Data
+    database.prepare('DELETE FROM payment_audits WHERE audit_date LIKE ?').run(`${monthStr}%`);
+    database.prepare('DELETE FROM jnt_verification_logs WHERE date_processed LIKE ?').run(`${monthStr}%`);
+
+    return { month: monthStr, archived: true };
   }
 };

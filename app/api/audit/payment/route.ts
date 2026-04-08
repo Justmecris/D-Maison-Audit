@@ -22,6 +22,18 @@ export async function POST(req: Request) {
     }
 
     await dbService.addPaymentAudits(payload.items);
+
+    // Unified Processing: Auto-populate J&T records
+    for (const item of payload.items) {
+      if (item.order_no) {
+        await dbService.upsertInvoice({
+          invoice_number: item.order_no,
+          customer_name: item.customer_name || 'Unknown',
+          status: 'PENDING'
+        });
+      }
+    }
+
     return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Audit save failed' }, { status: 500 });
