@@ -107,6 +107,11 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
+    const role = req.headers.get('x-user-role');
+    if (role !== 'CEO') {
+      return NextResponse.json({ error: 'Unauthorized: Only CEO can delete records' }, { status: 403 });
+    }
+
     const { invoiceNumber } = await req.json();
     if (!invoiceNumber) {
       return NextResponse.json({ error: 'Invoice number required' }, { status: 400 });

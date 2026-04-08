@@ -9,10 +9,48 @@ const inventoryToAudit = [
   { sku: 'DM-BRC-011', name: 'Diamond Tennis Bracelet', status: 'MEMO' },
 ];
 
+interface PaymentAuditItem {
+  order_no: string;
+  total: number;
+  paid_amount: number;
+}
+
 export default function Reports() {
   const [isAuditing, setIsAuditing] = useState(false);
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
   const [reportGenerated, setReportGenerated] = useState(false);
+  const [userRole, setUserRole] = useState<'ADMIN' | 'CEO' | null>(null);
+  const [paymentAudits, setPaymentAudits] = useState<PaymentAuditItem[]>([]);
+
+  const fetchFinanceData = async () => {
+    try {
+      const res = await fetch('/api/audit/payment');
+      const result = await res.json();
+      if (result.success) {
+        setPaymentAudits(result.data);
+      }
+    } catch (error) {
+      console.error('Finance fetch error:', error);
+    }
+  };
+
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    setUserRole(user.role || null);
+    
+    if (user.role === 'CEO') {
+      fetchFinanceData();
+      const interval = setInterval(fetchFinanceData, 30000); // 30s real-time bridge
+      return () => clearInterval(interval);
+    }
+  }, []);
+
+  const financeStats = useMemo(() => {
+    const totalBilled = paymentAudits.reduce((acc, curr) => acc + curr.total, 0);
+    const totalReceived = paymentAudits.reduce((acc, curr) => acc + curr.paid_amount, 0);
+    const discrepancy = totalBilled - totalReceived;
+    return { totalBilled, totalReceived, discrepancy };
+  }, [paymentAudits]);
 
   const toggleItem = (sku: string) => {
     setCheckedItems(prev => 
@@ -45,6 +83,55 @@ export default function Reports() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main Content Area */}
         <div className="lg:col-span-2 space-y-6">
+          {userRole === 'CEO' && !isAuditing && !reportGenerated && (
+            <div className="bg-[#0f172a] rounded-3xl p-8 border border-slate-800 shadow-2xl relative overflow-hidden group">
+               <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+                  <svg className="w-32 h-32 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+               </div>
+               
+               <div className="relative z-10 space-y-8">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h2 className="text-xl font-serif font-black text-white uppercase tracking-wider">Financial Comparison Engine</h2>
+                      <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest mt-1">Real-time Billed vs. Received Analysis</p>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/20">
+                      <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+                      <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">Live Sync Active</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="p-5 bg-white/5 rounded-2xl border border-white/10">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Billed</p>
+                      <p className="text-2xl font-black text-white">₱{financeStats.totalBilled.toLocaleString()}</p>
+                    </div>
+                    <div className="p-5 bg-white/5 rounded-2xl border border-white/10">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Received</p>
+                      <p className="text-2xl font-black text-[#947a46]">₱{financeStats.totalReceived.toLocaleString()}</p>
+                    </div>
+                    <div className={`p-5 rounded-2xl border ${financeStats.discrepancy > 0 ? 'bg-rose-500/10 border-rose-500/20' : 'bg-emerald-500/10 border-emerald-500/20'}`}>
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Discrepancy Tally</p>
+                      <p className={`text-2xl font-black ${financeStats.discrepancy > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                        {financeStats.discrepancy > 0 ? `₱${financeStats.discrepancy.toLocaleString()}` : '0.00'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest pt-4 border-t border-white/5">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-sm bg-white/20"></span>
+                      Admin Uploads
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-sm bg-[#947a46]"></span>
+                      Payment Providers
+                    </span>
+                  </div>
+               </div>
+            </div>
+          )}
+
           {isAuditing ? (
             <div className="bg-white rounded-3xl border-2 border-[#947a46] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
               <div className="bg-[#947a46] p-6 text-white flex justify-between items-center">

@@ -28,6 +28,7 @@ export default function JntReconciliation() {
   const [isSessionLocked, setIsSessionLocked] = useState(false);
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
+  const [userRole, setUserRole] = useState<'ADMIN' | 'CEO' | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -39,6 +40,9 @@ export default function JntReconciliation() {
   useEffect(() => {
     audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3');
     
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    setUserRole(user.role || null);
+
     const savedStaff = localStorage.getItem('jnt_active_staff');
     if (savedStaff && STAFF_LIST.includes(savedStaff)) {
       setStaffName(savedStaff);
@@ -293,7 +297,10 @@ export default function JntReconciliation() {
     try {
       const response = await fetch('/api/sync/sheets', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-role': userRole || ''
+        },
         body: JSON.stringify({ invoiceNumber })
       });
       const result = await response.json();
@@ -317,7 +324,10 @@ export default function JntReconciliation() {
       const deletePromises = selectedInvoices.map(invoiceNumber => 
         fetch('/api/sync/sheets', {
           method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-user-role': userRole || ''
+          },
           body: JSON.stringify({ invoiceNumber })
         })
       );
@@ -451,18 +461,20 @@ export default function JntReconciliation() {
             <input id="fileUpload" type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} />
           </button>
           
-          <button 
-            onClick={() => {
-              setIsDeleteMode(!isDeleteMode);
-              setSelectedInvoices([]);
-            }} 
-            className={`p-3 rounded-xl shadow-lg transition-all flex items-center justify-center ${isDeleteMode ? 'bg-red-500 text-white ring-4 ring-red-100' : 'bg-white text-slate-600 border border-slate-200 hover:text-red-500'}`}
-            title={isDeleteMode ? "Cancel Deletion" : "Toggle Delete Mode"}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-          </button>
+          {userRole === 'CEO' && (
+            <button 
+              onClick={() => {
+                setIsDeleteMode(!isDeleteMode);
+                setSelectedInvoices([]);
+              }} 
+              className={`p-3 rounded-xl shadow-lg transition-all flex items-center justify-center ${isDeleteMode ? 'bg-red-500 text-white ring-4 ring-red-100' : 'bg-white text-slate-600 border border-slate-200 hover:text-red-500'}`}
+              title={isDeleteMode ? "Cancel Deletion" : "Toggle Delete Mode"}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </button>
+          )}
 
-          {isDeleteMode && (
+          {isDeleteMode && userRole === 'CEO' && (
             <div className="flex gap-2 animate-in slide-in-from-right-4 duration-300">
               <button 
                 onClick={toggleSelectAll}

@@ -26,6 +26,13 @@ interface PaymentAuditItem {
   grand_total: number;
   discrepancy: string;
   audit_date: string;
+  // Staging specific fields
+  staging_invoice?: string;
+  staging_payment_amount?: number;
+  staging_shipping_fee?: number;
+  staging_item_total?: number;
+  staging_payment_from?: string;
+  has_discrepancy?: boolean;
 }
 
 export default function PaymentAuditPage() {
@@ -59,14 +66,14 @@ export default function PaymentAuditPage() {
       tracking: getIdx(['tracking number', 'tracking', 'waybill']),
       customer: getIdx(['customer name', 'customer']),
       profile: getIdx(['profile name', 'profile']),
-      subtotal: getIdx(['subtotal']),
-      shipping: getIdx(['shipping cost', 'shipping']),
+      subtotal: getIdx(['subtotal', 'item subtotal']),
+      shipping: getIdx(['shipping cost', 'shipping', 'shipping fee']),
       discount: getIdx(['discount']),
       total: getIdx(['total']),
-      paid_amount: getIdx(['paid amount', 'paid']),
+      paid_amount: getIdx(['paid amount', 'paid', 'payment amount']),
       provider: getIdx(['payment provider', 'provider', 'payment method']),
       acc_no: getIdx(['account no.', 'account no', 'account number']),
-      acc_name: getIdx(['account name']),
+      acc_name: getIdx(['account name', 'payment from']),
       paid_at: getIdx(['paid at', 'payment date']),
       sku: getIdx(['sku']),
       item_name: getIdx(['item name', 'item']),
@@ -85,8 +92,15 @@ export default function PaymentAuditPage() {
 
       const item_qty = num(idx.qty) || 1;
       const item_price = num(idx.price);
+      const subtotal = num(idx.subtotal) || (item_qty * item_price);
       const total = num(idx.total);
       const paid_amount = num(idx.paid_amount);
+      const shipping_fee = num(idx.shipping);
+
+      const staging_invoice = String(val(idx.no) || val(idx.alt_no));
+      const staging_payment_from = String(val(idx.provider) || val(idx.acc_name) || 'unknown');
+      
+      const has_discrepancy = Math.abs((subtotal + shipping_fee) - paid_amount) > 0.01;
 
       let discrepancy = '';
       if (Math.abs(paid_amount - total) > 0.01) {
@@ -99,8 +113,8 @@ export default function PaymentAuditPage() {
         tracking_number: String(val(idx.tracking)),
         customer_name: String(val(idx.customer)),
         profile_name: String(val(idx.profile)),
-        subtotal: num(idx.subtotal),
-        shipping_cost: num(idx.shipping),
+        subtotal,
+        shipping_cost: shipping_fee,
         discount: num(idx.discount),
         total,
         paid_amount,
@@ -114,7 +128,14 @@ export default function PaymentAuditPage() {
         item_price,
         grand_total: num(idx.grand_total),
         discrepancy,
-        audit_date: filterDate
+        audit_date: filterDate,
+        // Staging specific mapping
+        staging_invoice,
+        staging_payment_amount: paid_amount,
+        staging_shipping_fee: shipping_fee,
+        staging_item_total: subtotal,
+        staging_payment_from,
+        has_discrepancy
       };
     }).filter(item => item.order_no || item.sku);
 
@@ -199,9 +220,13 @@ export default function PaymentAuditPage() {
     const totalOrders = new Set(source.map(i => i.order_no)).size;
     const totalRevenue = source.reduce((acc, curr) => acc + curr.paid_amount, 0);
     const totalShipping = source.reduce((acc, curr) => acc + curr.shipping_cost, 0);
-    const discrepancies = source.filter(i => i.discrepancy).length;
+    const discrepancies = source.filter(i => i.discrepancy || i.has_discrepancy).length;
 
-    return { totalOrders, totalRevenue, totalShipping, discrepancies };
+    // Summary for staging area
+    const stagingTotalPayment = items.reduce((acc, curr) => acc + (curr.staging_payment_amount || 0), 0);
+    const stagingTotalShipping = items.reduce((acc, curr) => acc + (curr.staging_shipping_fee || 0), 0);
+
+    return { totalOrders, totalRevenue, totalShipping, discrepancies, stagingTotalPayment, stagingTotalShipping };
   }, [items, dbItems, viewMode]);
 
   return (
@@ -300,35 +325,37 @@ export default function PaymentAuditPage() {
                   <table className="w-full text-left text-[10px]">
                     <thead className="bg-white sticky top-0 z-10 shadow-sm">
                       <tr>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50">order #</th>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50">customer</th>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50">sku</th>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50">payment</th>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">paid</th>
-                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">status</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50">invoice</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">payment amount</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">shipping fee</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50 text-right">item total</th>
+                        <th className="px-6 py-4 font-black text-slate-400 lowercase border-b border-slate-50">payment from</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {items.map((item, idx) => (
-                        <tr key={idx} className={`hover:bg-slate-50 transition-colors ${item.discrepancy ? 'bg-rose-50/50' : ''}`}>
-                          <td className="px-6 py-4 font-bold text-slate-900">#{item.order_no}</td>
-                          <td className="px-6 py-4 uppercase font-bold text-slate-500">{item.customer_name}</td>
-                          <td className="px-6 py-4 font-mono">{item.sku}</td>
-                          <td className="px-6 py-4 uppercase text-slate-400">{item.payment_provider}</td>
-                          <td className="px-6 py-4 text-right font-black">₱{item.paid_amount.toLocaleString()}</td>
-                          <td className="px-6 py-4 text-right">
-                            {item.discrepancy ? (
-                              <span className="text-rose-500 font-black lowercase text-[8px] bg-rose-100 px-2 py-0.5 rounded shadow-sm" title={item.discrepancy}>discrepancy</span>
-                            ) : (
-                              <span className="text-emerald-500 font-black lowercase text-[8px] bg-emerald-100 px-2 py-0.5 rounded shadow-sm">verified</span>
-                            )}
-                          </td>
+                        <tr key={idx} className={`hover:bg-slate-50 transition-colors ${item.has_discrepancy ? 'bg-rose-50' : ''}`}>
+                          <td className="px-6 py-4 font-bold text-slate-900">#{item.staging_invoice}</td>
+                          <td className="px-6 py-4 text-right font-black">₱{(item.staging_payment_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="px-6 py-4 text-right font-bold text-slate-500">₱{(item.staging_shipping_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="px-6 py-4 text-right font-bold text-[#947a46]">₱{(item.staging_item_total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="px-6 py-4 uppercase font-bold text-slate-400">{item.staging_payment_from}</td>
                         </tr>
                       ))}
                       {items.length === 0 && (
-                        <tr><td colSpan={6} className="px-6 py-20 text-center text-slate-300 italic lowercase tracking-widest">no data staged for audit...</td></tr>
+                        <tr><td colSpan={5} className="px-6 py-20 text-center text-slate-300 italic lowercase tracking-widest">no data staged for audit...</td></tr>
                       )}
                     </tbody>
+                    {items.length > 0 && (
+                      <tfoot className="bg-slate-50 sticky bottom-0 z-10 font-black">
+                        <tr>
+                          <td className="px-6 py-4 text-slate-900 lowercase">total tally</td>
+                          <td className="px-6 py-4 text-right text-slate-900">₱{dashboardStats.stagingTotalPayment.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="px-6 py-4 text-right text-slate-900">₱{dashboardStats.stagingTotalShipping.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td colSpan={2}></td>
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </div>
              </div>
