@@ -86,6 +86,21 @@ const getDb = () => {
         );
     `);
 
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS personalized_necklaces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_name TEXT,
+            personalized_name TEXT,
+            font_name TEXT,
+            font_family TEXT,
+            width_mm DECIMAL(10, 2),
+            height_mm DECIMAL(10, 2),
+            color TEXT,
+            status TEXT DEFAULT 'PENDING',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
     db.exec(`CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices(invoice_number)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_logs_invoice ON jnt_verification_logs(invoice_number)`);
     return db;
@@ -146,7 +161,82 @@ const ensureDb = () => {
   throw new Error("Database not initialized.");
 };
 
+export interface PersonalizedNecklace {
+  id?: number;
+  customer_name: string;
+  personalized_name: string;
+  font_name: string;
+  font_family: string;
+  width_mm: number;
+  height_mm: number;
+  color: string;
+  status: string;
+  created_at?: string;
+}
+
 export const dbService = {
+  addPersonalizedNecklace: async (necklace: PersonalizedNecklace) => {
+    if (ensureDb()) {
+      const { error } = await supabase!.from('personalized_necklaces').insert(necklace);
+      if (error) throw error;
+      return;
+    }
+    const database = getDb();
+    const stmt = database.prepare(`
+      INSERT INTO personalized_necklaces (customer_name, personalized_name, font_name, font_family, width_mm, height_mm, color, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    return stmt.run(
+      necklace.customer_name,
+      necklace.personalized_name,
+      necklace.font_name,
+      necklace.font_family,
+      necklace.width_mm,
+      necklace.height_mm,
+      necklace.color,
+      necklace.status || 'PENDING'
+    );
+  },
+
+  getPersonalizedNecklaces: async (status?: string): Promise<PersonalizedNecklace[]> => {
+    if (ensureDb()) {
+      let query = supabase!.from('personalized_necklaces').select('*');
+      if (status) query = query.eq('status', status);
+      const { data, error } = await query.order('created_at', { ascending: false });
+      if (error) throw error;
+      return data as PersonalizedNecklace[];
+    }
+    const database = getDb();
+    let sql = 'SELECT * FROM personalized_necklaces';
+    const params: any[] = [];
+    if (status) {
+      sql += ' WHERE status = ?';
+      params.push(status);
+    }
+    sql += ' ORDER BY created_at DESC';
+    return database.prepare(sql).all(...params) as PersonalizedNecklace[];
+  },
+
+  updateNecklaceStatus: async (id: number, status: string) => {
+    if (ensureDb()) {
+      const { error } = await supabase!.from('personalized_necklaces').update({ status }).eq('id', id);
+      if (error) throw error;
+      return;
+    }
+    const database = getDb();
+    return database.prepare('UPDATE personalized_necklaces SET status = ? WHERE id = ?').run(status, id);
+  },
+
+  deleteNecklace: async (id: number) => {
+    if (ensureDb()) {
+      const { error } = await supabase!.from('personalized_necklaces').delete().eq('id', id);
+      if (error) throw error;
+      return;
+    }
+    const database = getDb();
+    return database.prepare('DELETE FROM personalized_necklaces WHERE id = ?').run(id);
+  },
+
   getAllInvoices: async (): Promise<InvoiceRecord[]> => {
     if (ensureDb()) {
       try {
