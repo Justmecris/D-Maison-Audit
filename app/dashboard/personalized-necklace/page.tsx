@@ -77,6 +77,14 @@ export default function PersonalizedNecklacePage() {
     ctx.fillText(label, x + wPx / 2, y + hPx + (2 * scale));
   };
 
+  const toggleSelectAll = () => {
+    if (selectedIds.length === necklaces.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(necklaces.map(n => n.id!));
+    }
+  };
+
   const exportSelected = async (format: 'png' | 'jpg' | 'pdf' | 'svg') => {
     if (selectedIds.length === 0) {
       alert('Please select at least one necklace to export');
@@ -125,6 +133,12 @@ export default function PersonalizedNecklacePage() {
       pdf.addImage(imgData, 'PNG', 0, 0, sheetWmm, sheetHmm);
       pdf.save('necklaces-export.pdf');
     }
+
+    // Automatically mark as COMPLETED after export
+    for (const id of selectedIds) {
+      await updateStatus(id, 'COMPLETED');
+    }
+    setSelectedIds([]);
   };
 
   return (
@@ -157,7 +171,17 @@ export default function PersonalizedNecklacePage() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Select</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          checked={necklaces.length > 0 && selectedIds.length === necklaces.length}
+                          onChange={toggleSelectAll}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <span>Select All</span>
+                      </div>
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Font</th>
