@@ -1,16 +1,8 @@
 import { NextResponse } from 'next/server';
 import { dbService } from '@/app/lib/db';
 
-function corsHeaders() {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  };
-}
-
 export async function OPTIONS() {
-  return NextResponse.json({}, { headers: corsHeaders() });
+  return NextResponse.json({});
 }
 
 export async function GET(request: Request) {
@@ -18,9 +10,9 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') || undefined;
     const necklaces = await dbService.getPersonalizedNecklaces(status);
-    return NextResponse.json(necklaces, { headers: corsHeaders() });
+    return NextResponse.json(necklaces);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders() });
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
@@ -38,9 +30,9 @@ export async function POST(request: Request) {
       status: 'PENDING'
     };
     await dbService.addPersonalizedNecklace(necklace);
-    return NextResponse.json({ message: 'Order submitted successfully' }, { headers: corsHeaders() });
+    return NextResponse.json({ message: 'Order submitted successfully' });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders() });
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
@@ -49,9 +41,9 @@ export async function PATCH(request: Request) {
     const body = await request.json();
     const { id, status } = body;
     await dbService.updateNecklaceStatus(id, status);
-    return NextResponse.json({ message: 'Status updated successfully' }, { headers: corsHeaders() });
+    return NextResponse.json({ message: 'Status updated successfully' });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders() });
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
@@ -61,8 +53,8 @@ export async function DELETE(request: Request) {
     const id = searchParams.get('id');
     if (!id) throw new Error('ID is required');
     await dbService.deleteNecklace(parseInt(id));
-    return NextResponse.json({ message: 'Order deleted successfully' }, { headers: corsHeaders() });
+    return NextResponse.json({ message: 'Order deleted successfully' });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders() });
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
