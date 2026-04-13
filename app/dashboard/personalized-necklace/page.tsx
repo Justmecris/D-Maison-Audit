@@ -218,36 +218,56 @@ export default function PersonalizedNecklacePage() {
             ))}
           </div>
 
-          <div className="flex flex-wrap gap-3 mb-6">
-            <button 
-              onClick={selectAll} 
-              className="px-4 py-2 bg-white border border-gray-200 text-gray-700 text-[11px] font-bold rounded-xl hover:bg-gray-50 transition shadow-sm"
-            >
-              SELECT ALL ({necklaces.length})
-            </button>
-            <button 
-              onClick={selectAllPending} 
-              className="px-4 py-2 bg-white border border-gray-200 text-amber-600 text-[11px] font-bold rounded-xl hover:bg-amber-50 transition shadow-sm"
-            >
-              SELECT ALL PENDING
-            </button>
+          <div className="flex flex-wrap gap-4 mb-6 items-center">
+            <label className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-sm cursor-pointer group">
+              <input 
+                type="checkbox" 
+                checked={necklaces.length > 0 && selectedIds.length === necklaces.length}
+                onChange={(e) => {
+                  if (e.target.checked) setSelectedIds(necklaces.map(n => n.id!));
+                  else setSelectedIds([]);
+                }}
+                className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer"
+              />
+              <span className="text-[11px] font-black text-gray-700 uppercase tracking-tight">Select All ({necklaces.length})</span>
+            </label>
+
+            <label className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl hover:bg-amber-50 transition shadow-sm cursor-pointer group">
+              <input 
+                type="checkbox" 
+                checked={necklaces.filter(n => n.status === 'PENDING').length > 0 && necklaces.filter(n => n.status === 'PENDING').every(n => selectedIds.includes(n.id!))}
+                onChange={(e) => {
+                  const pendingIds = necklaces.filter(n => n.status === 'PENDING').map(n => n.id!);
+                  if (e.target.checked) {
+                    setSelectedIds(prev => Array.from(new Set([...prev, ...pendingIds])));
+                  } else {
+                    setSelectedIds(prev => prev.filter(id => !pendingIds.includes(id)));
+                  }
+                }}
+                className="h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+              />
+              <span className="text-[11px] font-black text-amber-600 uppercase tracking-tight">Select Pending</span>
+            </label>
+
             <div className="h-8 w-px bg-gray-200 self-center mx-1"></div>
+            
             <button 
               onClick={deleteSelected} 
               disabled={selectedIds.length === 0}
-              className={`px-4 py-2 text-[11px] font-bold rounded-xl transition shadow-sm ${
+              className={`px-4 py-2 text-[11px] font-black rounded-xl transition shadow-sm uppercase tracking-tight ${
                 selectedIds.length > 0 
                   ? 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100' 
                   : 'bg-gray-50 text-gray-300 border border-gray-100 cursor-not-allowed'
               }`}
             >
-              DELETE SELECTED ({selectedIds.length})
+              Delete Selected ({selectedIds.length})
             </button>
+
             <button 
               onClick={deleteAll} 
-              className="px-4 py-2 bg-white border border-red-200 text-red-500 text-[11px] font-bold rounded-xl hover:bg-red-500 hover:text-white transition shadow-sm ml-auto"
+              className="px-4 py-2 bg-white border border-red-200 text-red-500 text-[11px] font-black rounded-xl hover:bg-red-500 hover:text-white transition shadow-sm ml-auto uppercase tracking-tight"
             >
-              DELETE ALL ORDERS
+              Clear Database
             </button>
           </div>
 
