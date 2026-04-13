@@ -51,7 +51,21 @@ export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    if (!id) throw new Error('ID is required');
+    const ids = searchParams.get('ids');
+    const clearAll = searchParams.get('clearAll') === 'true';
+
+    if (clearAll) {
+      await dbService.clearPersonalizedNecklaces();
+      return NextResponse.json({ message: 'All orders cleared successfully' });
+    }
+
+    if (ids) {
+      const idArray = ids.split(',').map(Number);
+      await dbService.deleteMultipleNecklaces(idArray);
+      return NextResponse.json({ message: 'Selected orders deleted successfully' });
+    }
+
+    if (!id) throw new Error('ID or IDs are required');
     await dbService.deleteNecklace(parseInt(id));
     return NextResponse.json({ message: 'Order deleted successfully' });
   } catch (error: any) {

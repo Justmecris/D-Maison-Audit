@@ -237,6 +237,30 @@ export const dbService = {
     return database.prepare('DELETE FROM personalized_necklaces WHERE id = ?').run(id);
   },
 
+  deleteMultipleNecklaces: async (ids: number[]) => {
+    if (ensureDb()) {
+      const { error } = await supabase!.from('personalized_necklaces').delete().in('id', ids);
+      if (error) throw error;
+      return;
+    }
+    const database = getDb();
+    const stmt = database.prepare('DELETE FROM personalized_necklaces WHERE id = ?');
+    const deleteMany = database.transaction((ids: number[]) => {
+      for (const id of ids) stmt.run(id);
+    });
+    return deleteMany(ids);
+  },
+
+  clearPersonalizedNecklaces: async () => {
+    if (ensureDb()) {
+      const { error } = await supabase!.from('personalized_necklaces').delete().neq('id', 0);
+      if (error) throw error;
+      return;
+    }
+    const database = getDb();
+    return database.prepare('DELETE FROM personalized_necklaces').run();
+  },
+
   getAllInvoices: async (): Promise<InvoiceRecord[]> => {
     if (ensureDb()) {
       try {
